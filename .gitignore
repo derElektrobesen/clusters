@@ -1,4 +1,17 @@
+Makefile.in
+Makefile
+aclocal.m4
+autom4te.cache
+config.status
+config.log
+configure
+depcomp
+*/.deps
+*/Makefile.in
+*/Makefile
 *~
 *.swp
 */*~
 */*.swp
+*.o
+*/*.o

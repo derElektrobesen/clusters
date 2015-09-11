@@ -1,0 +1,2 @@
+SUBDIRS = speedtest
+dist_doc_DATA = README AUTHORS COPYING INSTALL NEWS ChangeLog
