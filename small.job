@@ -29,14 +29,14 @@
 # @ initialdir = ___INITIAL_DIR___
 
 # STDOUT for job
-# @ output = $(initialdir)/test.$(user).$(jobid).stdout
+# @ output = $(initialdir)/___APP_NAME___.$(user).$(jobid).stdout
 # STDERR for job
-# @ error = $(initialdir)/test.$(user).$(jobid).stderr
+# @ error = $(initialdir)/___APP_NAME___.$(user).$(jobid).stderr
 
 
 # notification - Specifies when the user specified in the notify_user keyword is sent mail.
 # Syntax: notification = always|error|start|never|complete
-# @ notification = complete
+# @ notification = error
 
 # node - Specifies the minimum and maximum number of nodes requested by a job step.
 # You must specify at least one of these values. The value of the node keyword
@@ -75,7 +75,7 @@ export I_MPI_PIN_DOMAIN
 mpdboot -r ssh -n `cat $LOADL_HOSTFILE|sort|uniq|wc -l` -f $LOADL_HOSTFILE
 
 #### Atension IU7 students !!!
-mpirun -r ssh -machinefile $LOADL_HOSTFILE -n $LOADL_TOTAL_TASKS ./___APP_NAME___
+mpirun -r ssh -machinefile $LOADL_HOSTFILE -n $LOADL_TOTAL_TASKS ___INITIAL_DIR___/___APP_NAME___
 
 mpdallexit
 

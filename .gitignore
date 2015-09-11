@@ -21,5 +21,5 @@ missing
 *.o
 */*.o
 *.tar.gz
-*/small.job
+*.job
 speedtest/speedtest
