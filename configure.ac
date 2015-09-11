@@ -113,8 +113,6 @@ fi
 ACX_MPI
 CC=$MPICC
 
-#AC_PROG_CC
-
 AC_CONFIG_FILES([
      Makefile
      speedtest/Makefile
