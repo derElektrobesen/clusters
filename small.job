@@ -51,7 +51,7 @@
 
 # @ tasks_per_node = 1
 
-# @ environment =  $TVTRACE=$(initialdir)/test.$(user).$(jobid).trace
+# @ environment =  $TVTRACE=$(initialdir)/___APP_NAME___.$(user).$(jobid).trace
 
 # node_usage - Specifies whether this job step shares nodes with other job steps.
 # Syntax: node_usage = shared | not_shared
