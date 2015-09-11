@@ -15,3 +15,5 @@ depcomp
 */*.swp
 *.o
 */*.o
+*.tar.gz
+speedtest/speedtest
