@@ -1,8 +1,17 @@
 bin_PROGRAMS = speedtest
-speedtest_SOURCES = main.c
+
+include $(top_srcdir)/common.am
 
 NODES_COUNT=8
 JOBFILE=$(top_srcdir)/$(bin_PROGRAMS).job
+
+speedtest_SOURCES =			\
+	main.c				\
+	speedtest.c
+
+speedtest_CFLAGS =			\
+	@AM_CFLAGS@			\
+	-DNODES_COUNT=$(NODES_COUNT)
 
 all-local: $(top_srcdir)/small.job $(top_srcdir)/gen_job.sh $(JOBFILE)
 
