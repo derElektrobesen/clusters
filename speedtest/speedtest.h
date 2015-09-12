@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <mpi.h>
 
-void speedtest(MPI_Comm comm);
-void manage(int list_size, const MPI_Comm *comm_list);
+void speedtest(MPI_Comm comm, int manager_rank);
+void manage(int list_size, const MPI_Comm *comm_list, int manager_rank);
 
 #endif // SPEEDTEST_H

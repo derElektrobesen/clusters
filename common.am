@@ -1,4 +1,4 @@
 abs_topdir = @abs_topdir@
 abs_srcdir = @abs_srcdir@
 
-CFLAGS = -Wall -Werror -Wpedantic -flto -fpic -I$(top_srcdir)/include
+AM_CFLAGS = -Wall -Werror -Wpedantic -flto -fpic -I$(top_srcdir)/include

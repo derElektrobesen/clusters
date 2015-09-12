@@ -23,7 +23,7 @@ static void do_test(int proc_rank) {
 	MPI_Group_incl(world_group, SV_SIZE(comm_group), comm_group, &group);
 	MPI_Comm_create(MPI_COMM_WORLD, group, &comm);
 
-	speedtest(comm);
+	speedtest(comm, MANAGER_RANK);
 
 	MPI_Group_free(&group);
 	MPI_Comm_free(&comm);
@@ -48,7 +48,7 @@ static void do_manage() {
 		MPI_Group_free(&group);
 	}
 
-	manage(SV_SIZE(comm_list), comm_list);
+	manage(SV_SIZE(comm_list), comm_list, MANAGER_RANK);
 
 	// destruct comm group
 	for (int i = MANAGER_RANK + 1; i < NODES_COUNT; ++i) {

@@ -10,7 +10,7 @@ speedtest_SOURCES =			\
 	speedtest.c
 
 speedtest_CFLAGS =			\
-	@AM_CFLAGS@			\
+	$(AM_CFLAGS)			\
 	-DNODES_COUNT=$(NODES_COUNT)
 
 all-local: $(top_srcdir)/small.job $(top_srcdir)/gen_job.sh $(JOBFILE)
