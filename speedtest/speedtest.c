@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "speedtest.h"
+#include "utils.h"
 
 #define N_SENDINGS	100
 #define RAND_BLOCK_LEN	sizeof(int)
@@ -21,7 +22,7 @@ void manage(int list_size, const MPI_Comm *comm_list, int manager_rank) {
 		// TODO: send different data
 		snprintf(data, sizeof(data), "Message from %d to %d\n", manager_rank, i);
 		MPI_Bcast(data, sizeof(data), MPI_CHAR, manager_rank, comm_list[i]);
-		printf("Message sent to %d", i);
+		warn("Message sent to %d", i);
 	}
 }
 
@@ -29,5 +30,5 @@ void speedtest(MPI_Comm comm, int manager_rank) {
 	static char data[DATA_SIZE] = "";
 	MPI_Bcast(data, sizeof(data), MPI_CHAR, manager_rank, comm);
 
-	printf("Message received: \"%s\"\n", data);
+	warn("Message received: \"%s\"\n", data);
 }

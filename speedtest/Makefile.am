@@ -4,10 +4,13 @@ include $(top_srcdir)/common.am
 
 NODES_COUNT=8
 JOBFILE=$(top_srcdir)/$(bin_PROGRAMS).job
+LIBDIR=$(top_srcdir)/lib
 
 speedtest_SOURCES =			\
 	main.c				\
 	speedtest.c
+
+speedtest_LDADD = $(LIBDIR)/libutils.a
 
 speedtest_CFLAGS =			\
 	$(AM_CFLAGS)			\

@@ -4,11 +4,9 @@ AM_INIT_AUTOMAKE
 m4_include(m4/configure.ac.acxmpi)
 m4_include(m4/configure.ac.axcheckcompileflags)
 
-#AC_SUBST([AM_CFLAGS])
-#AC_SUBST([AM_LDFLAGS])
-
-ACX_MPI
 AC_PROG_CC
+AC_PROG_RANLIB
+ACX_MPI
 
 AC_CHECK_LIB([pthread], [pthread_create], [], [ AC_MSG_ERROR([ pthread library is required ]) ])
 AC_CHECK_HEADERS(pthread.h)
@@ -20,14 +18,17 @@ AX_CHECK_COMPILE_FLAG([-Wpedantic], [ EXTRA_FLAGS="$EXTRA_FLAGS -Wpedantic" ])
 AX_CHECK_COMPILE_FLAG([-flto], [ EXTRA_FLAGS="$EXTRA_FLAGS -flto" ])
 AX_CHECK_COMPILE_FLAG([-fpic], [ EXTRA_FLAGS="$EXTRA_FLAGS -fpic" ])
 AX_CHECK_COMPILE_FLAG([-std=c99], [ EXTRA_FLAGS="$EXTRA_FLAGS -std=c99" ])
+AX_CHECK_COMPILE_FLAG([-Wno-gnu], [ EXTRA_FLAGS="$EXTRA_FLAGS -Wno-gnu" ])
+AX_CHECK_COMPILE_FLAG([-Wformat], [ EXTRA_FLAGS="$EXTRA_FLAGS -Wformat" ])
 
 AC_SUBST(EXTRA_FLAGS)
 
 CC=$MPICC
 
 AC_CONFIG_FILES([
-     Makefile
-     speedtest/Makefile
+	Makefile
+	lib/Makefile
+	speedtest/Makefile
 ])
 
 AC_OUTPUT
