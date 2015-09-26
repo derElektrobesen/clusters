@@ -5,26 +5,17 @@
 #include <stdio.h>
 #include <assert.h>
 
-static short _current_rank = -1;
+static const short _current_rank = -1;
 
 void set_rank(short rank) {
-	_current_rank = rank;
+	*(short *)&_current_rank = rank;
 }
 
-short get_rank() {
-	assert(_current_rank != -1);
-	return _current_rank;
-}
-
-void u_printf(const char *type, const char *fmt, ...) {
+static void u_printf(const char *type, const char *fmt, va_list valist) {
 	// TODO: is the other way to do this exists?
 	static __thread char str[1024] = "";
 
-	va_list valist;
-	va_start(valist, fmt);
 	int printed = vsnprintf(str, sizeof(str), fmt, valist);
-	va_end(valist);
-
 	if (printed == sizeof(str) - 1) {
 		warn("Possibly trying to print too many characters");
 	}
@@ -36,4 +27,25 @@ void u_printf(const char *type, const char *fmt, ...) {
 	strftime(str_time, sizeof(str_time), "%d %b %T", timeinfo);
 
 	printf("%s [%s] %s\n", str_time, type, str);
+}
+
+static void um_printf(const char *fmt, va_list valist) {
+	u_printf(MANAGER_STR, fmt, valist);
+}
+
+static void uw_printf(short rank, const char *fmt, va_list valist) {
+	char title[sizeof(WORKER_STR) + (2 << sizeof(rank)) + 1] = "";
+
+	snprintf(title, sizeof(title), WORKER_STR ":%d", rank);
+	u_printf(title, fmt, valist);
+}
+
+void warn(const char *fmt, ...) {
+	va_list valist;
+	va_start(valist, fmt);
+	if (_current_rank == MANAGER_RANK)
+		um_printf(fmt, valist);
+	else
+		uw_printf(_current_rank, fmt, valist);
+	va_end(valist);
 }

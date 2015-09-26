@@ -7,7 +7,7 @@
 
 static void do_test(int proc_rank) {
 	if (proc_rank == MANAGER_RANK) {
-		printf("Unexpected process rank: %d", proc_rank);
+		warn("Unexpected process rank: %d", proc_rank);
 		return;
 	}
 
