@@ -20,6 +20,7 @@ missing
 */*.swp
 *.o
 */*.o
+*/*.a
 *.tar.gz
 *.job
 speedtest/speedtest
