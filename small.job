@@ -29,9 +29,9 @@
 # @ initialdir = ___INITIAL_DIR___
 
 # STDOUT for job
-# @ output = $(initialdir)/___APP_NAME___.$(user).$(jobid).stdout
+# @ output = $(initialdir)/logs/___APP_NAME___.$(user).$(jobid).stdout
 # STDERR for job
-# @ error = $(initialdir)/___APP_NAME___.$(user).$(jobid).stderr
+# @ error = $(initialdir)/logs/___APP_NAME___.$(user).$(jobid).stderr
 
 
 # notification - Specifies when the user specified in the notify_user keyword is sent mail.
