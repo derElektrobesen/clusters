@@ -5,8 +5,6 @@
 #	error "Nodes count is not defined!"
 #endif
 
-#define MANAGER_RANK	0
-
 static void do_test(int proc_rank) {
 	if (proc_rank == MANAGER_RANK) {
 		printf("Unexpected process rank: %d", proc_rank);
@@ -59,17 +57,19 @@ static void do_manage() {
 int main(int argc, char **argv) {
 	MPI_Init(&argc, &argv);
 
+	int world_rank = 0;
+	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
+
 	int world_size = 0;
 	MPI_Comm_size(MPI_COMM_WORLD, &world_size);
 
+	set_rank(world_rank);
+
 	if (world_size != NODES_COUNT) {
-		printf("Must specify MP_PROCS=%d. Terminating.\n", NODES_COUNT);
+		warn("Must specify MP_PROCS=%d. Terminating.\n", NODES_COUNT);
 		MPI_Finalize();
 		return 0;
 	}
-
-	int world_rank = 0;
-	MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
 	if (world_rank == MANAGER_RANK) {
 		do_manage();

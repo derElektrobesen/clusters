@@ -32,5 +32,8 @@ void u_printf(const char *type, const char *fmt, ...) {
 	time_t rawtime = time(NULL);
 	struct tm *timeinfo = localtime(&rawtime);
 
-	printf("%s [%s] %s\n", asctime(timeinfo), type, str);
+	char str_time[64] = "";
+	strftime(str_time, sizeof(str_time), "%d %b %T", timeinfo);
+
+	printf("%s [%s] %s\n", str_time, type, str);
 }
