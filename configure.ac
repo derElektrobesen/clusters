@@ -28,6 +28,7 @@ AC_CONFIG_FILES([
 	Makefile
 	lib/Makefile
 	speedtest/Makefile
+	tuple_space/Makefile
 ])
 
 AC_OUTPUT
