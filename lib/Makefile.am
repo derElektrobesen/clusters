@@ -6,7 +6,8 @@ LIB_TNT = $(LIB_TNT_PATH)/tnt/libtarantool.a
 libutils_a_SOURCES =	utils.c			\
 			tuple_space.c
 
-libutils_a_CFLAGS =	$(AM_CFLAGS)
+libutils_a_CFLAGS =	$(AM_CFLAGS)		\
+			-DTUPLE_SPACE_MAX_TUPLE=256
 
 libutils_a_LIBADD =	$(LIB_TNT)
 
