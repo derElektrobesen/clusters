@@ -111,44 +111,29 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 	return tuple_space_connect(conn_timeout, req_timeout);
 }
 
-static const char *tuple_space_types[TUPLE_SPACE_TYPE_MAX] = {
-	[TUPLE_SPACE_TYPE_BOOL] = "BOOL",
-	[TUPLE_SPACE_TYPE_STR] = "STR",
-	[TUPLE_SPACE_TYPE_INT] = "INT",
-	[TUPLE_SPACE_TYPE_BIN] = "BINARY",
-	[TUPLE_SPACE_TYPE_FLOAT] = "FLOAT",
-	[TUPLE_SPACE_TYPE_DOUBLE] = "DOUBLE",
-	[TUPLE_SPACE_TYPE_NIL] = "NIL",
+static const char *tuple_space_types[__TUPLE_SPACE_VALUE_TYPE(MAX)] = {
+	/* Stringify types */
+#define HELPER(_typename, ...) [__TUPLE_SPACE_VALUE_TYPE(_typename)] = #_typename,
+	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#undef HELPER
 };
 
-static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tuple_space_elem_value_t *val) {
-	if (val->val_type < 0 || val->val_type >= TUPLE_SPACE_TYPE_MAX) {
+static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tuple_space_value_t *val) {
+	if (val->value_type < 0 || val->value_type >= __TUPLE_SPACE_VALUE_TYPE(MAX)) {
 		log_e("Unknown value type found!");
 		return -1;
 	}
 
 	tnt_object_add_array(tuple, 2); // first arg is elemnt type, second is element value
-	tnt_object_add_strz(tuple, tuple_space_types[val->val_type]);
+	tnt_object_add_strz(tuple, tuple_space_types[val->value_type]);
 
-	switch (val->val_type) {
-		case TUPLE_SPACE_TYPE_BOOL:
-			tnt_object_add_bool(tuple, val->_bool);
+	switch (val->value_type) {
+#define HELPER(_typename, _vartype, _varname, tnt_suffix)					\
+		case __TUPLE_SPACE_VALUE_TYPE(_typename):					\
+			tnt_object_add_##tnt_suffix(tuple, val->_varname);			\
 			break;
-		case TUPLE_SPACE_TYPE_STR:
-			tnt_object_add_strz(tuple, val->_str);
-			break;
-		case TUPLE_SPACE_TYPE_INT:
-			tnt_object_add_int(tuple, val->_int);
-			break;
-		case TUPLE_SPACE_TYPE_BIN:
-			tnt_object_add_bin(tuple, val->_bin.value, val->_bin.size);
-			break;
-		case TUPLE_SPACE_TYPE_FLOAT:
-			tnt_object_add_float(tuple, val->_float);
-			break;
-		case TUPLE_SPACE_TYPE_DOUBLE:
-			tnt_object_add_double(tuple, val->_double);
-			break;
+		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#undef HELPER
 		default:
 			log_e("Unknown value type found!");
 			return -1;
@@ -156,6 +141,7 @@ static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tupl
 	return 0;
 }
 
+/*
 static int tuple_space_tuple_add_type(struct tnt_stream *tuple, const enum tuple_space_elem_value_type_t *val) {
 	if (*val < 0 || *val >= TUPLE_SPACE_TYPE_MAX) {
 		log_e("Unknown value type found!");
@@ -185,33 +171,36 @@ static int tuple_space_tuple_add_mask(struct tnt_stream *tuple, const enum tuple
 
 	return 0;
 }
+*/
 
-static struct tnt_stream *tuple_space_tuple_mk(int n_elems, va_list ap, int write_only) {
+static struct tnt_stream *tuple_space_tuple_mk(va_list ap) {
 	struct tnt_stream *tuple = tnt_object(NULL);
-	tnt_object_add_array(tuple, n_elems);
 
-	int i = 0;
+	tnt_object_type(tuple, TNT_SBO_PACKED);
+	tnt_object_add_array(tuple, 0);
+
 	int abort = 0;
-	for (; !abort && i < n_elems; ++i) {
-		struct tuple_space_elem_t elem = va_arg(ap, struct tuple_space_elem_t);
+	while (1) {
+		const struct tuple_space_elem_t elem = va_arg(ap, struct tuple_space_elem_t);
 		switch (elem.elem_type) {
-			case TUPLE_SPACE_ELEM_VALUE:
-				if (tuple_space_tuple_add_val(tuple, &elem._val) == -1)
+			case TUPLE_SPACE_VALUE_TYPE:
+				if (tuple_space_tuple_add_val(tuple, &elem.val_elem) == -1)
 					abort = 1;
 				break;
-			case TUPLE_SPACE_ELEM_TYPE:
-				if (write_only && elem._type != TUPLE_SPACE_TYPE_NIL) {
-					log_e("Only values are expected in write-only tuples (type found)");
-					abort = 1;
-				} else if (tuple_space_tuple_add_type(tuple, &elem._type) == -1)
-					abort = 1;
+			case TUPLE_SPACE_REF_TYPE:
+				// TODO
+				log_t("Reftype found");
 				break;
-			case TUPLE_SPACE_ELEM_MASK:
-				if (write_only) {
-					log_e("Only values are expected in write-only tuples (mask found)");
-					abort = 1;
-				} else if (tuple_space_tuple_add_mask(tuple, &elem._mask) == -1)
-					abort = 1;
+			case TUPLE_SPACE_MASK_TYPE:
+				// TODO
+				log_t("Masktype found");
+				break;
+			case TUPLE_SPACE_TUPLE_TYPE:
+				// TODO:
+				log_t("Tupletype found");
+				break;
+			case TUPLE_SPACE_MAX_TYPE:
+				log_t("Last elem found in tuple");
 				break;
 			default:
 				log_e("Invalid tuple came! Abort sending");
@@ -224,6 +213,8 @@ static struct tnt_stream *tuple_space_tuple_mk(int n_elems, va_list ap, int writ
 		tnt_stream_free(tuple);
 		return NULL;
 	}
+
+	tnt_object_container_close(tuple);
 
 	return tuple;
 }
@@ -261,12 +252,12 @@ static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args
 	return 0;
 }
 
-int _tuple_space_out(int n_elems, ...) {
+int __tuple_space_out(int dummy, ...) {
 	va_list ap;
-	va_start(ap, n_elems);
+	va_start(ap, dummy);
 
-	log_t("Trying to send %d-elements tuple into tuple space", n_elems);
-	struct tnt_stream *tuple = tuple_space_tuple_mk(n_elems, ap, 1);
+	log_t("Trying to send tuple into tuple space");
+	struct tnt_stream *tuple = tuple_space_tuple_mk(ap);
 
 	int ret = -1;
 	if (tuple) {

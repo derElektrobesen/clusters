@@ -10,7 +10,7 @@ lu_decomposition_SOURCES =	main.c
 lu_decomposition_LDADD =	$(LIBDIR)/libutils.a			\
 				$(LIB_TNT)
 lu_decomposition_CFLAGS =	$(AM_CFLAGS)				\
-				-DTUPLE_SPACE_HOST='"mgmt.nodes"'	\
+				-DTUPLE_SPACE_HOST='"localhost"'	\
 				-DTUPLE_SPACE_PORT=10010
 
 all-local: $(top_srcdir)/small.job $(top_srcdir)/gen_job.sh $(JOBFILE)
