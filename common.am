@@ -1,4 +1,10 @@
 abs_topdir = @abs_topdir@
 abs_srcdir = @abs_srcdir@
 
-AM_CFLAGS = $(EXTRA_FLAGS) -I$(top_srcdir)/include
+LIB_TNT_PATH = $(top_srcdir)/tarantool-client
+
+AM_CFLAGS =				\
+	$(EXTRA_FLAGS)			\
+	-I$(top_srcdir)/include 	\
+	-I$(LIB_TNT_PATH)/include	\
+	-I$(LIB_TNT_PATH)/third_party

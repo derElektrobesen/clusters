@@ -1,51 +1,25 @@
 #include "utils.h"
 
 #include <time.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <assert.h>
 
-static const short _current_rank = -1;
+#ifdef __MACH__ // fucking Machintosh
+#include <mach/clock.h>
+#include <mach/mach.h>
 
-void set_rank(short rank) {
-	*(short *)&_current_rank = rank;
+void clock_gettime_impl(struct timespec *ts) {
+	clock_serv_t cclock;
+	mach_timespec_t mts;
+	host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
+	clock_get_time(cclock, &mts);
+	mach_port_deallocate(mach_task_self(), cclock);
+	ts->tv_sec = mts.tv_sec;
+	ts->tv_nsec = mts.tv_nsec;
 }
 
-static void u_printf(const char *type, const char *fmt, va_list valist) {
-	// TODO: is the other way to do this exists?
-	static __thread char str[1024] = "";
+#else
 
-	int printed = vsnprintf(str, sizeof(str), fmt, valist);
-	if (printed == sizeof(str) - 1) {
-		warn("Possibly trying to print too many characters");
-	}
-
-	time_t rawtime = time(NULL);
-	struct tm *timeinfo = localtime(&rawtime);
-
-	char str_time[64] = "";
-	strftime(str_time, sizeof(str_time), "%d %b %T", timeinfo);
-
-	printf("%s [%s] %s\n", str_time, type, str);
+void clock_gettime_impl(struct timespec *ts) {
+	clock_gettime(CLOCK_REALTIME, ts);
 }
 
-static void um_printf(const char *fmt, va_list valist) {
-	u_printf(MANAGER_STR, fmt, valist);
-}
-
-static void uw_printf(short rank, const char *fmt, va_list valist) {
-	char title[sizeof(WORKER_STR) + (2 << sizeof(rank)) + 1] = "";
-
-	snprintf(title, sizeof(title), WORKER_STR ":%d", rank);
-	u_printf(title, fmt, valist);
-}
-
-void warn(const char *fmt, ...) {
-	va_list valist;
-	va_start(valist, fmt);
-	if (_current_rank == MANAGER_RANK)
-		um_printf(fmt, valist);
-	else
-		uw_printf(_current_rank, fmt, valist);
-	va_end(valist);
-}
+#endif
