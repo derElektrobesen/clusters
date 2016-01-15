@@ -118,6 +118,7 @@ static const char *tuple_space_types[TUPLE_SPACE_TYPE_MAX] = {
 	[TUPLE_SPACE_TYPE_BIN] = "BINARY",
 	[TUPLE_SPACE_TYPE_FLOAT] = "FLOAT",
 	[TUPLE_SPACE_TYPE_DOUBLE] = "DOUBLE",
+	[TUPLE_SPACE_TYPE_NIL] = "NIL",
 };
 
 static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tuple_space_elem_value_t *val) {
@@ -199,7 +200,7 @@ static struct tnt_stream *tuple_space_tuple_mk(int n_elems, va_list ap, int writ
 					abort = 1;
 				break;
 			case TUPLE_SPACE_ELEM_TYPE:
-				if (write_only) {
+				if (write_only && elem._type != TUPLE_SPACE_TYPE_NIL) {
 					log_e("Only values are expected in write-only tuples (type found)");
 					abort = 1;
 				} else if (tuple_space_tuple_add_type(tuple, &elem._type) == -1)
@@ -227,17 +228,55 @@ static struct tnt_stream *tuple_space_tuple_mk(int n_elems, va_list ap, int writ
 	return tuple;
 }
 
+static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args) {
+	void request_cleanup(struct tnt_request **req) {
+		if (req && *req) {
+			tnt_request_free(*req);
+			*req = NULL;
+		}
+	}
+
+	struct tnt_request *req __attribute__((cleanup(request_cleanup))) = tnt_request_call(NULL);
+
+	if (!req) {
+		log_e("Can't create call request");
+		return -1;
+	}
+
+	if (tnt_request_set_funcz(req, func_name) == -1) {
+		log_e("Can't set function name");
+		return -1;
+	}
+
+	if (tnt_request_set_tuple(req, args) == -1) {
+		log_e("Can't set arguments for call request");
+		return -1;
+	}
+
+	if (tnt_request_compile(tuple_space_configuration.tnt, req) == -1) {
+		log_e("Can't send request into stream: %s", tnt_strerror(tuple_space_configuration.tnt));
+		return -1;
+	}
+
+	return 0;
+}
+
 int _tuple_space_out(int n_elems, ...) {
 	va_list ap;
 	va_start(ap, n_elems);
 
+	log_t("Trying to send %d-elements tuple into tuple space", n_elems);
 	struct tnt_stream *tuple = tuple_space_tuple_mk(n_elems, ap, 1);
 
-	if (!tuple)
-		return -1;
+	int ret = -1;
+	if (tuple) {
+		ret = tuple_space_tuple_send("tuple_space.add_tuple", tuple);
+		tnt_stream_free(tuple);
+	}
 
-	tnt_stream_free(tuple);
+	if (ret != -1)
+		log_t("Tuples successfully sent into tuple space");
 
 	va_end(ap);
-	return 0;
+	return ret;
 }

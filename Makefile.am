@@ -1,7 +1,6 @@
 SUBDIRS =		\
 	lib		\
-	speedtest	\
-	tuple_space
+	lu-decomposition
 
 docdir = .
 dist_doc_DATA = README AUTHORS COPYING INSTALL NEWS ChangeLog

@@ -23,8 +23,7 @@ AC_SUBST(EXTRA_FLAGS)
 AC_CONFIG_FILES([
 	Makefile
 	lib/Makefile
-	speedtest/Makefile
-	tuple_space/Makefile
+	lu-decomposition/Makefile
 ])
 
 AC_OUTPUT

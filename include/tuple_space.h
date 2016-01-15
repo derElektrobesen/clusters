@@ -22,7 +22,7 @@ enum tuple_space_elem_type_t {
 };
 
 enum tuple_space_elem_value_type_t {
-	TUPLE_SPACE_TYPE_BOOL,
+	TUPLE_SPACE_TYPE_BOOL = 0,
 	TUPLE_SPACE_TYPE_STR,
 	TUPLE_SPACE_TYPE_INT,
 	TUPLE_SPACE_TYPE_BIN,
@@ -95,9 +95,5 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 
 // XXX: Use tuple_space_out() macro instead
 int _tuple_space_out(int n_elems, ...);
-
-void test_func() {
-	tuple_space_out(ANY, STR("test"), ANY_FLOAT, INT(10));
-}
 
 #endif

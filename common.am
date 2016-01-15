@@ -2,9 +2,18 @@ abs_topdir = @abs_topdir@
 abs_srcdir = @abs_srcdir@
 
 LIB_TNT_PATH = $(top_srcdir)/tarantool-client
+LIB_TNT = $(LIB_TNT_PATH)/tnt/libtarantool.a
 
 AM_CFLAGS =				\
 	$(EXTRA_FLAGS)			\
 	-I$(top_srcdir)/include 	\
 	-I$(LIB_TNT_PATH)/include	\
 	-I$(LIB_TNT_PATH)/third_party
+
+AM_LDFLAGS =				\
+	$(LIB_TNT_PATH)/tnt/libtarantool.a
+
+all-local: $(LIB_TNT)
+
+$(LIB_TNT):
+	cd $(LIB_TNT_PATH) && cmake -DCMAKE_C_COMPILER=$(CC) -DCMAKE_CXX_COMPILER=$(CXX) . && make -j 10
