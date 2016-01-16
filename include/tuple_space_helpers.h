@@ -106,7 +106,7 @@
 #define FOR_EACH_99(what, x, ...) what(x, 98) FOR_EACH_98(what,  __VA_ARGS__)
 #define FOR_EACH_100(what, x, ...) what(x, 99) FOR_EACH_99(what,  __VA_ARGS__)
 
-#define FOR_EACH_NARG(...) FOR_EACH_NARG_(__VA_ARGS__, FOR_EACH_RSEQ_N())
+#define ARGS_COUNT(...) FOR_EACH_NARG_(__VA_ARGS__, FOR_EACH_RSEQ_N())
 #define FOR_EACH_NARG_(...) FOR_EACH_ARG_N(__VA_ARGS__)
 
 #define FOR_EACH_ARG_N(						\
@@ -136,7 +136,7 @@
 	9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 
 #define FOR_EACH_(N, what, x, ...) CONCATENATE(FOR_EACH_, N)(what, x, __VA_ARGS__)
-#define FOR_EACH(what, x, ...) FOR_EACH_(FOR_EACH_NARG(x, __VA_ARGS__), what, x, __VA_ARGS__)
+#define FOR_EACH(what, x, ...) FOR_EACH_(ARGS_COUNT(x, __VA_ARGS__), what, x, __VA_ARGS__)
 
 #define FOR_EACH_ARG_MAX 100
 

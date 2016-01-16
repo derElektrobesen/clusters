@@ -229,9 +229,9 @@ struct tuple_space_elem_t {
 												\
 	int __ref_supported = __ref_supported_; /* will be used by TUPLE_SPACE_TYPE_DEDUCTOR_MAIN */ \
 	/* We should pass first arg to create va_arg */						\
-	callback(0, FOR_EACH(TYPE_DEDUCTOR, ##__VA_ARGS__)					\
+	callback(ARGS_COUNT(__VA_ARGS__), FOR_EACH(TYPE_DEDUCTOR, ##__VA_ARGS__)		\
 			/* Add a marker to stop iteration over a tuple */			\
-			(struct tuple_space_elem_t){ .elem_type = TUPLE_SPACE_MAX_TYPE, });	\
+			NULL);	\
 })
 
 // Push a tuple into tuple space.
@@ -239,7 +239,7 @@ struct tuple_space_elem_t {
 #define tuple_space_out(...) __tuple_space_wrapper(__tuple_space_out, 0, ##__VA_ARGS__)
 
 // Dummy variable is required
-int __tuple_space_out(int dummy, ...);
+int __tuple_space_out(int n_items, ...);
 
 #define tuple_space_set_configuration(host, port) \
 	tuple_space_set_configuration_ex(host, port, NULL, NULL)
