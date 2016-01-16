@@ -204,19 +204,27 @@ struct tuple_space_elem_t {
 	__typeof(__element_##__index) *__value = &__element_##__index;	/* To check a variable type */ \
 	void *__val_ptr = &__element_##__index;		/* To convert var in a specific type */	\
 	struct tuple_space_elem_t __res;		/* To store a tuple item */		\
+	struct tuple_space_elem_t *__res_ptr = &__res;						\
 												\
-	/* Generate deductor for each type */							\
-	/* Generate conditions for array-types */						\
-	TUPLE_SPACE_SUPPORTED_TYPES(TUPLE_SPACE_TYPE_DEDUCTOR_EX,				\
-			__TUPLE_SPACE_SIMPLE_EX, __TUPLE_SPACE_ARRAY_OF_EX) {			\
-		/* Not an array (or array ref). Check common var type */			\
-		TUPLE_SPACE_SUPPORTED_TYPES(TUPLE_SPACE_TYPE_DEDUCTOR_MAIN,			\
-				__TUPLE_SPACE_SIMPLE_DEFAULT, __TUPLE_SPACE_ARRAY_OF_DEFAULT) { \
-			/* This will be called if type wasn't found */				\
-			assert(!"Unsupported argument type!");					\
+	if (__builtin_types_compatible_p(__typeof(*__value), struct tuple_space_elem_t)		\
+			&& (((struct tuple_space_elem_t *)__val_ptr)->elem_type == TUPLE_SPACE_TUPLE_TYPE)) { \
+		_log_tuple(TUPLE, "----> TUPLE OF SIZE %d FOUND",				\
+			((struct tuple_space_elem_t *)__val_ptr)->tuple_elem.n_values);		\
+		__res_ptr = (struct tuple_space_elem_t *)__val_ptr;				\
+	} else {										\
+		/* Generate deductor for each type */						\
+		/* Generate conditions for array-types */					\
+		TUPLE_SPACE_SUPPORTED_TYPES(TUPLE_SPACE_TYPE_DEDUCTOR_EX,			\
+				__TUPLE_SPACE_SIMPLE_EX, __TUPLE_SPACE_ARRAY_OF_EX) {		\
+			/* Not an array (or array ref). Check common var type */		\
+			TUPLE_SPACE_SUPPORTED_TYPES(TUPLE_SPACE_TYPE_DEDUCTOR_MAIN,		\
+					__TUPLE_SPACE_SIMPLE_DEFAULT, __TUPLE_SPACE_ARRAY_OF_DEFAULT) { \
+				/* This will be called if type wasn't found */			\
+				assert(!"Unsupported argument type!");				\
+			}									\
 		}										\
 	}											\
-	__res;											\
+	*__res_ptr;										\
 }), /* Comma is required ! */
 
 #define TUPLE_SPACE_POINTER_STORAGER(__val, __index)						\
@@ -232,6 +240,24 @@ struct tuple_space_elem_t {
 	callback(ARGS_COUNT(__VA_ARGS__), FOR_EACH(TYPE_DEDUCTOR, ##__VA_ARGS__)		\
 			/* Add a marker to stop iteration over a tuple */			\
 			NULL);	\
+})
+
+// We should deduct a type of ptr
+#define TUPLE(n_items, ptr) ({									\
+	struct tuple_space_elem_t __res; \
+												\
+	/* Generate deductor for each type */							\
+	/* Generate conditions for array-types */						\
+	TUPLE_SPACE_SUPPORTED_TYPES(TUPLE_SPACE_TYPE_DEDUCTOR_EX,				\
+			__TUPLE_SPACE_SIMPLE_EX, __TUPLE_SPACE_ARRAY_OF_EX) {			\
+		/* Not an array (or array ref). Check common var type */			\
+		TUPLE_SPACE_SUPPORTED_TYPES(TUPLE_SPACE_TYPE_DEDUCTOR_MAIN,			\
+				__TUPLE_SPACE_SIMPLE_DEFAULT, __TUPLE_SPACE_ARRAY_OF_DEFAULT) { \
+			/* This will be called if type wasn't found */				\
+			assert(!"Unsupported argument type!");					\
+		}										\
+	}											\
+	__res;											\
 })
 
 // Push a tuple into tuple space.
