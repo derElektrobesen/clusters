@@ -11,7 +11,9 @@ AM_CFLAGS =				\
 	-I$(LIB_TNT_PATH)/third_party
 
 AM_LDFLAGS =				\
+	$(EXTRA_LD_FLAGS)		\
 	$(LIB_TNT_PATH)/tnt/libtarantool.a
+
 
 all-local: $(LIB_TNT)
 

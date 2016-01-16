@@ -1,6 +1,19 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+
+#if __STDC_VERSION__ >= 199901L
+#define _XOPEN_SOURCE 600
+#else
+#define _XOPEN_SOURCE 500
+#endif /* __STDC_VERSION__ */
+
+#ifndef __USE_POSIX
+#define __USE_POSIX
+#endif
+
+#include <sys/types.h>
+
 #include <time.h>
 #include <stdio.h>
 #include <stdint.h>

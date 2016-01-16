@@ -114,7 +114,7 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 static const char *tuple_space_types[__TUPLE_SPACE_VALUE_TYPE(MAX)] = {
 	/* Stringify types */
 #define HELPER(_typename, ...) [__TUPLE_SPACE_VALUE_TYPE(_typename)] = #_typename,
-	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+	TUPLE_SPACE_SUPPORTED_TYPES(HELPER, __TUPLE_SPACE_SIMPLE_DEFAULT, __TUPLE_SPACE_ARRAY_OF_DEFAULT)
 #undef HELPER
 };
 
@@ -132,7 +132,7 @@ static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tupl
 		case __TUPLE_SPACE_VALUE_TYPE(_typename):					\
 			tnt_object_add_##tnt_suffix(tuple, val->_varname);			\
 			break;
-		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+		TUPLE_SPACE_SUPPORTED_TYPES(HELPER, __TUPLE_SPACE_SIMPLE_DEFAULT, __TUPLE_SPACE_ARRAY_OF_DEFAULT)
 #undef HELPER
 		default:
 			log_e("Unknown value type found!");
@@ -253,6 +253,7 @@ static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args
 }
 
 int __tuple_space_out(int dummy, ...) {
+	return 0;
 	va_list ap;
 	va_start(ap, dummy);
 
