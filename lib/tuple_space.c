@@ -217,7 +217,7 @@ static struct tnt_stream *tuple_space_tuple_mk(int n_items, va_list ap) {
 	return tuple;
 }
 
-static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args) {
+static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args, uint32_t *sync) {
 	void request_cleanup(struct tnt_request **req) {
 		if (req && *req) {
 			tnt_request_free(*req);
@@ -249,6 +249,14 @@ static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args
 		return -1;
 	}
 
+	if (sync)
+		*sync = req->hdr.sync;
+
+	return 0;
+}
+
+static int tuple_space_tuple_recv(int n_items, va_list ap, uint32_t sync) {
+	// TODO
 	return 0;
 }
 
@@ -261,13 +269,45 @@ int __tuple_space_out(int n_items, ...) {
 
 	int ret = -1;
 	if (tuple) {
-		ret = tuple_space_tuple_send("tuple_space.add_tuple", tuple);
+		ret = tuple_space_tuple_send("tuple_space.add_tuple", tuple, NULL);
 		tnt_stream_free(tuple);
 	}
 
 	if (ret != -1)
-		log_t("Tuples successfully sent into tuple space");
+		log_t("Tuple successfully sent into tuple space");
 
 	va_end(ap);
+	return ret;
+}
+
+int __tuple_space_in(int n_items, ...) {
+	va_list ap;
+	va_start(ap, n_items);
+
+	log_d("Trying to get tuple with %d items from tuple space", n_items);
+	struct tnt_stream *tuple = tuple_space_tuple_mk(n_items, ap);
+
+	int ret = -1;
+	uint32_t sync;
+	if (tuple) {
+		ret = tuple_space_tuple_send("tuple_space.get_tuple", tuple, &sync);
+		tnt_stream_free(tuple);
+	}
+
+	va_end(ap);
+	if (ret != -1)
+		log_t("Tuple successfully sent into tuple space");
+	else
+		return -1;
+
+	// Reiterate ap => store a tuple into variables given
+	va_start(ap, n_items);
+	ret = tuple_space_tuple_recv(n_items, ap, sync);
+
+	if (ret != -1)
+		log_t("Tuple successfully returned from tuple space");
+
+	va_end(ap);
+
 	return ret;
 }

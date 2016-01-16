@@ -237,9 +237,11 @@ struct tuple_space_elem_t {
 // Push a tuple into tuple space.
 // We shouldn't accept a pointers on variables.
 #define tuple_space_out(...) __tuple_space_wrapper(__tuple_space_out, 0, ##__VA_ARGS__)
+#define tuple_space_in(...) __tuple_space_wrapper(__tuple_space_in, 1, ##__VA_ARGS__)
 
 // Dummy variable is required
 int __tuple_space_out(int n_items, ...);
+int __tuple_space_in(int n_items, ...);
 
 #define tuple_space_set_configuration(host, port) \
 	tuple_space_set_configuration_ex(host, port, NULL, NULL)
