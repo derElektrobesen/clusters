@@ -124,12 +124,17 @@ static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tupl
 		return -1;
 	}
 
+	log_t("Value element found");
+
 	tnt_object_add_array(tuple, 2); // first arg is elemnt type, second is element value
 	tnt_object_add_strz(tuple, tuple_space_types[val->value_type]);
 
+	log_t("Type is %d", val->value_type);
+
 	switch (val->value_type) {
-#define HELPER(_typename, _vartype, _varname, tnt_suffix)					\
+#define HELPER(_typename, _vartype, _varname, tnt_suffix, _printf_spec)				\
 		case __TUPLE_SPACE_VALUE_TYPE(_typename):					\
+			log_d("Processing " #_typename " == " _printf_spec, val->_varname);	\
 			tnt_object_add_##tnt_suffix(tuple, val->_varname);			\
 			break;
 		TUPLE_SPACE_SUPPORTED_TYPES(HELPER, __TUPLE_SPACE_SIMPLE_DEFAULT, __TUPLE_SPACE_ARRAY_OF_DEFAULT)
@@ -253,11 +258,10 @@ static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args
 }
 
 int __tuple_space_out(int dummy, ...) {
-	return 0;
 	va_list ap;
 	va_start(ap, dummy);
 
-	log_t("Trying to send tuple into tuple space");
+	log_d("Trying to send tuple into tuple space");
 	struct tnt_stream *tuple = tuple_space_tuple_mk(ap);
 
 	int ret = -1;

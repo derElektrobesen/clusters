@@ -13,17 +13,18 @@
 //	Vartype
 //	Varname
 //	TntConverterSuffix
+//	PrintfSpecifier
 //
 // If variable is an array, define it with ARRAY_OF
 // Otherwise, define it with SIMPLE
 #define TUPLE_SPACE_SUPPORTED_TYPES(_, SIMPLE, ARRAY_OF)					\
-	_(STR, ARRAY_OF(char), _str, strz)							\
-	_(UINT32, SIMPLE(uint32_t), _uint32, int)						\
-	_(INT32, SIMPLE(int32_t), _int, int)							\
-	_(UINT64, SIMPLE(uint64_t), _uint64, int)						\
-	_(INT64, SIMPLE(int64_t), _int64, int)							\
-	_(FLOAT, SIMPLE(float), _float, float)							\
-	_(DOUBLE, SIMPLE(double), _double, double)
+	_(STR, ARRAY_OF(char), _str, strz, "%s")						\
+	_(UINT32, SIMPLE(uint32_t), _uint32, int, "%u")						\
+	_(INT32, SIMPLE(int32_t), _int, int, "%d")						\
+	_(UINT64, SIMPLE(uint64_t), _uint64, int, "%" PRIu64)					\
+	_(INT64, SIMPLE(int64_t), _int64, int, "%" PRId64)					\
+	_(FLOAT, SIMPLE(float), _float, float, "%f")						\
+	_(DOUBLE, SIMPLE(double), _double, double, "%lf")
 
 // Will be used many times
 #define __TUPLE_SPACE_VALUE_TYPE(_type) TUPLE_SPACE_ELEM_TYPE_## _type
@@ -158,26 +159,22 @@ struct tuple_space_elem_t {
 
 // We should generate functions to convert real value into tuple_space_elem_t
 // __ref_supported, __value and __res should be defined in a parent macro !
-#define TUPLE_SPACE_TYPE_DEDUCTOR_MAIN(_typename, _vartype, _varname, ...)			\
+#define TUPLE_SPACE_TYPE_DEDUCTOR_MAIN(_typename, _vartype, _varname, func, spec, ...)		\
 	/* We can't create a closure: else statement is used */					\
-	if (_log_tuple(_typename, "TRYING VAL")							\
-			&& __tuple_space_try_type(_typename, _vartype, _varname)) {		\
-		_log_tuple(_typename, "----> VALUE FOUND");					\
+	if (__tuple_space_try_type(_typename, _vartype, _varname)) {		\
+		_log_tuple(_typename, "----> VALUE FOUND (" spec ")", *(_vartype *)__val_impl);	\
 		__res = __tuple_space_value_found(_typename, _vartype, _varname);		\
-	} else if (_log_tuple(_typename, "TRYING TYPE")						\
-			&& __tuple_space_try_ref_type(_typename, _vartype *, _varname)) {	\
+	} else if (__tuple_space_try_ref_type(_typename, _vartype *, _varname)) {	\
 		_log_tuple(_typename, "----> REF FOUND");					\
 		__res = __tuple_space_ref_found(_typename, _vartype, _varname);			\
 	} else
 
 #define TUPLE_SPACE_TYPE_DEDUCTOR_MAIN_ARR(_typename, _vartype, _varname, ...)			\
 	/* We can't create a closure: else statement is used */					\
-	if (_log_tuple(_typename, "TRYING ARR VAL")						\
-			&& __tuple_space_try_type(_typename, _vartype[], _varname)) {		\
+	if (__tuple_space_try_type(_typename, _vartype[], _varname)) {		\
 		_log_tuple(_typename, "----> ARRAY FOUND");					\
 		__res = __tuple_space_value_found(_typename, _vartype *, _varname);		\
-	} else if (_log_tuple(_typename, "TRYING ARR POINTER")					\
-			&& __tuple_space_try_ref_type(_typename, _vartype **, _varname)) {	\
+	} else if (__tuple_space_try_ref_type(_typename, _vartype **, _varname)) {	\
 		_log_tuple(_typename, "----> POINTER ON ARRAY FOUND");				\
 		__res = __tuple_space_ref_found(_typename, _vartype *, _varname);		\
 	} else
