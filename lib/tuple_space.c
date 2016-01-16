@@ -185,7 +185,8 @@ static struct tnt_stream *tuple_space_tuple_mk(va_list ap) {
 	tnt_object_add_array(tuple, 0);
 
 	int abort = 0;
-	while (1) {
+	int done = 0;
+	while (!done && !abort) {
 		const struct tuple_space_elem_t elem = va_arg(ap, struct tuple_space_elem_t);
 		switch (elem.elem_type) {
 			case TUPLE_SPACE_VALUE_TYPE:
@@ -206,6 +207,7 @@ static struct tnt_stream *tuple_space_tuple_mk(va_list ap) {
 				break;
 			case TUPLE_SPACE_MAX_TYPE:
 				log_t("Last elem found in tuple");
+				done = 1;
 				break;
 			default:
 				log_e("Invalid tuple came! Abort sending");
@@ -231,6 +233,8 @@ static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args
 			*req = NULL;
 		}
 	}
+
+	assert(tuple_space_configuration.tnt);
 
 	struct tnt_request *req __attribute__((cleanup(request_cleanup))) = tnt_request_call(NULL);
 

@@ -117,8 +117,8 @@ struct tuple_space_elem_t {
 
 // Check a specific variable type
 #define __tuple_space_try_type(_typename, _vartype, _varname)					\
-	(__builtin_types_compatible_p(__typeof(__value), _vartype)				\
-	 || __builtin_types_compatible_p(__typeof(__value), const _vartype))
+	(__builtin_types_compatible_p(__typeof(*__value), _vartype)				\
+	 || __builtin_types_compatible_p(__typeof(*__value), const _vartype))
 
 // Check a specific variable ref type
 #define __tuple_space_try_ref_type(_typename, _vartype, _varname) ({				\
@@ -131,8 +131,8 @@ struct tuple_space_elem_t {
 
 // Macro is used to show tuple items type check
 // TODO: Remove this macro usage in future release !!!
-#define _log_tuple(_typename, fmt, ...) ({ 1; })
-//#define _log_tuple(_typename, fmt, ...) ({ log_t(fmt " -> " #_typename "", ##__VA_ARGS__); 1; })
+//#define _log_tuple(_typename, fmt, ...) ({ 1; })
+#define _log_tuple(_typename, fmt, ...) ({ log_t(fmt " -> " #_typename "", ##__VA_ARGS__); 1; })
 
 // We have found an item's type. Create a structure ti send into tuplei space
 #define __tuple_space_value_found(_typename, _vartype, _varname) ({				\
@@ -140,7 +140,17 @@ struct tuple_space_elem_t {
 		.elem_type = TUPLE_SPACE_VALUE_TYPE,						\
 		.val_elem = (struct tuple_space_value_t) {					\
 			.value_type = __TUPLE_SPACE_VALUE_TYPE(_typename),			\
-			._varname = *(_vartype *)__val_impl,					\
+			._varname = *(_vartype *)__val_ptr,					\
+		},										\
+	};											\
+})
+
+#define __tuple_space_arr_found(_typename, _vartype, _varname) ({				\
+	(struct tuple_space_elem_t){								\
+		.elem_type = TUPLE_SPACE_VALUE_TYPE,						\
+		.val_elem = (struct tuple_space_value_t) {					\
+			.value_type = __TUPLE_SPACE_VALUE_TYPE(_typename),			\
+			._varname = (_vartype *)__val_ptr,					\
 		},										\
 	};											\
 })
@@ -152,7 +162,7 @@ struct tuple_space_elem_t {
 		.elem_type = TUPLE_SPACE_REF_TYPE,						\
 		.ref_elem = (struct tuple_space_ref_t) {					\
 			.ref_type = __TUPLE_SPACE_REF_TYPE(_typename),				\
-			._varname = *(_vartype **)__val_impl,					\
+			._varname = (_vartype *)__val_ptr,					\
 		},										\
 	};											\
 })
@@ -161,20 +171,20 @@ struct tuple_space_elem_t {
 // __ref_supported, __value and __res should be defined in a parent macro !
 #define TUPLE_SPACE_TYPE_DEDUCTOR_MAIN(_typename, _vartype, _varname, func, spec, ...)		\
 	/* We can't create a closure: else statement is used */					\
-	if (__tuple_space_try_type(_typename, _vartype, _varname)) {		\
-		_log_tuple(_typename, "----> VALUE FOUND (" spec ")", *(_vartype *)__val_impl);	\
+	if (__tuple_space_try_type(_typename, _vartype, _varname)) {				\
+		_log_tuple(_typename, "----> VALUE FOUND (" spec ")", *(_vartype *)__val_ptr);	\
 		__res = __tuple_space_value_found(_typename, _vartype, _varname);		\
-	} else if (__tuple_space_try_ref_type(_typename, _vartype *, _varname)) {	\
+	} else if (__tuple_space_try_ref_type(_typename, _vartype *, _varname)) {		\
 		_log_tuple(_typename, "----> REF FOUND");					\
 		__res = __tuple_space_ref_found(_typename, _vartype, _varname);			\
 	} else
 
 #define TUPLE_SPACE_TYPE_DEDUCTOR_MAIN_ARR(_typename, _vartype, _varname, ...)			\
 	/* We can't create a closure: else statement is used */					\
-	if (__tuple_space_try_type(_typename, _vartype[], _varname)) {		\
+	if (__tuple_space_try_type(_typename, _vartype[], _varname)) {				\
 		_log_tuple(_typename, "----> ARRAY FOUND");					\
-		__res = __tuple_space_value_found(_typename, _vartype *, _varname);		\
-	} else if (__tuple_space_try_ref_type(_typename, _vartype **, _varname)) {	\
+		__res = __tuple_space_arr_found(_typename, _vartype, _varname);			\
+	} else if (__tuple_space_try_ref_type(_typename, _vartype **, _varname)) {		\
 		_log_tuple(_typename, "----> POINTER ON ARRAY FOUND");				\
 		__res = __tuple_space_ref_found(_typename, _vartype *, _varname);		\
 	} else
@@ -190,10 +200,10 @@ struct tuple_space_elem_t {
 #define __TUPLE_SPACE_ARRAY_OF_EX(_type) _type, TUPLE_SPACE_TYPE_DEDUCTOR_MAIN_ARR
 #define __TUPLE_SPACE_SIMPLE_EX(_type) _type, __TUPLE_SPACE_DUMMY
 
-#define TYPE_DEDUCTOR(__val) ({									\
-	__typeof(__val) __value = __val;	/* To check a variable type */			\
-	void *__val_impl = &__value;		/* To convert var in a specific type */		\
-	struct tuple_space_elem_t __res;	/* To store a tuple item */			\
+#define TYPE_DEDUCTOR(_, __index) ({								\
+	__typeof(__element_##__index) *__value = &__element_##__index;	/* To check a variable type */ \
+	void *__val_ptr = &__element_##__index;		/* To convert var in a specific type */	\
+	struct tuple_space_elem_t __res;		/* To store a tuple item */		\
 												\
 	/* Generate deductor for each type */							\
 	/* Generate conditions for array-types */						\
@@ -209,8 +219,14 @@ struct tuple_space_elem_t {
 	__res;											\
 }), /* Comma is required ! */
 
+#define TUPLE_SPACE_POINTER_STORAGER(__val, __index)						\
+	__typeof(__val) __element_##__index = __val;
+
 // Generate a tuple creator for a specofic action
 #define __tuple_space_wrapper(callback, __ref_supported_, ...) ({				\
+	/* Store elements in local skope */							\
+	FOR_EACH(TUPLE_SPACE_POINTER_STORAGER, ##__VA_ARGS__)					\
+												\
 	int __ref_supported = __ref_supported_; /* will be used by TUPLE_SPACE_TYPE_DEDUCTOR_MAIN */ \
 	/* We should pass first arg to create va_arg */						\
 	callback(0, FOR_EACH(TYPE_DEDUCTOR, ##__VA_ARGS__)					\
