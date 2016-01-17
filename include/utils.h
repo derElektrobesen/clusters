@@ -1,7 +1,6 @@
 #ifndef UTILS_H
 #define UTILS_H
 
-
 #if __STDC_VERSION__ >= 199901L
 #define _XOPEN_SOURCE 600
 #else
@@ -13,6 +12,7 @@
 #endif
 
 #include <sys/types.h>
+#include <sys/time.h>
 
 #include <time.h>
 #include <stdio.h>

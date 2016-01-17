@@ -1,5 +1,3 @@
-#include <stdarg.h>
-
 #include "tuple_space.h"
 
 #include "tarantool/tarantool.h"
@@ -7,6 +5,36 @@
 #include "tarantool/tnt_opt.h"
 
 #include "msgpuck/msgpuck.h"
+
+#define HELPER(_typename, _vartype, ...) \
+	inline static void __tuple_space_value_convertor_##_typename(struct tuple_space_elem_t *dest, void *data) { \
+		dest->elem_type = TUPLE_SPACE_VALUE_TYPE; \
+		dest->val_elem.value_type = __TUPLE_SPACE_VALUE_TYPE(_typename); \
+		dest->val_elem._typename = *(_vartype *)data; \
+	} \
+	inline static void __tuple_space_ref_convertor_##_typename(struct tuple_space_elem_t *dest, void *data) { \
+		dest->elem_type = TUPLE_SPACE_REF_TYPE; \
+		dest->ref_elem.ref_type = __TUPLE_SPACE_VALUE_TYPE(_typename); \
+		dest->ref_elem._typename = *(_vartype **)data; \
+	}
+
+TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+
+#undef HELPER
+
+static void __tuple_space_invalid_type(struct tuple_space_elem_t *dest __attribute__((unused)), void *data __attribute__((unused))) {
+	assert(!"Trying to send into tuple space a value of unknown type!");
+}
+
+__tuple_space_convertor_t __tuple_space_convertors[__TUPLE_SPACE_INVALID_TYPE + 1] = {
+#define HELPER(_typename, ...) [__TUPLE_SPACE_VALUE_TYPE(_typename)] = __tuple_space_value_convertor_##_typename,
+	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#undef HELPER
+#define HELPER(_typename, ...) [TUPLE_SPACE_N_TYPES + __TUPLE_SPACE_VALUE_TYPE(_typename)] = __tuple_space_ref_convertor_##_typename,
+	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#undef HELPER
+	[__TUPLE_SPACE_INVALID_TYPE] = __tuple_space_invalid_type,
+};
 
 struct tuple_space_configuration_t {
 	char host[255];
@@ -111,15 +139,18 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 	return tuple_space_connect(conn_timeout, req_timeout);
 }
 
-static const char *tuple_space_types[__TUPLE_SPACE_VALUE_TYPE(MAX)] = {
+static const char *tuple_space_types[TUPLE_SPACE_N_TYPES] = {
 	/* Stringify types */
+	"",
+#if 0
 #define HELPER(_typename, ...) [__TUPLE_SPACE_VALUE_TYPE(_typename)] = #_typename,
 	TUPLE_SPACE_SUPPORTED_TYPES(HELPER, __TUPLE_SPACE_SIMPLE_DEFAULT, __TUPLE_SPACE_ARRAY_OF_DEFAULT)
 #undef HELPER
+#endif
 };
 
 static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tuple_space_value_t *val) {
-	if (val->value_type < 0 || val->value_type >= __TUPLE_SPACE_VALUE_TYPE(MAX)) {
+	if (val->value_type < 0 || val->value_type >= TUPLE_SPACE_N_TYPES) {
 		log_e("Unknown value type found!");
 		return -1;
 	}
@@ -130,6 +161,7 @@ static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tupl
 	tnt_object_add_strz(tuple, tuple_space_types[val->value_type]);
 
 	switch (val->value_type) {
+#if 0
 #define HELPER(_typename, _vartype, _varname, tnt_suffix, _printf_spec)				\
 		case __TUPLE_SPACE_VALUE_TYPE(_typename):					\
 			log_d("Processing " #_typename " == '" _printf_spec "'", val->_varname);\
@@ -137,6 +169,7 @@ static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tupl
 			break;
 		TUPLE_SPACE_SUPPORTED_TYPES(HELPER, __TUPLE_SPACE_SIMPLE_DEFAULT, __TUPLE_SPACE_ARRAY_OF_DEFAULT)
 #undef HELPER
+#endif
 		default:
 			log_e("Unknown value type found!");
 			return -1;
@@ -176,7 +209,7 @@ static int tuple_space_tuple_add_mask(struct tnt_stream *tuple, const enum tuple
 }
 */
 
-static struct tnt_stream *tuple_space_tuple_mk(int n_items, va_list ap) {
+static struct tnt_stream *tuple_space_tuple_mk(int n_items, const struct tuple_space_elem_t *items) {
 	struct tnt_stream *tuple = tnt_object(NULL);
 
 	tnt_object_add_array(tuple, n_items);
@@ -184,10 +217,10 @@ static struct tnt_stream *tuple_space_tuple_mk(int n_items, va_list ap) {
 	int abort = 0;
 	int i = 0;
 	for (; !abort && i < n_items; ++i) {
-		const struct tuple_space_elem_t elem = va_arg(ap, struct tuple_space_elem_t);
-		switch (elem.elem_type) {
+		const struct tuple_space_elem_t *elem = items + i;
+		switch (elem->elem_type) {
 			case TUPLE_SPACE_VALUE_TYPE:
-				if (tuple_space_tuple_add_val(tuple, &elem.val_elem) == -1)
+				if (tuple_space_tuple_add_val(tuple, &elem->val_elem) == -1)
 					abort = 1;
 				break;
 			case TUPLE_SPACE_REF_TYPE:
@@ -255,17 +288,16 @@ static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args
 	return 0;
 }
 
+/*
 static int tuple_space_tuple_recv(int n_items, va_list ap, uint32_t sync) {
 	// TODO
 	return 0;
 }
+*/
 
-int __tuple_space_out(int n_items, ...) {
-	va_list ap;
-	va_start(ap, n_items);
-
+int __tuple_space_out(int n_items, const struct tuple_space_elem_t *items) {
 	log_d("Trying to send tuple with %d items into tuple space", n_items);
-	struct tnt_stream *tuple = tuple_space_tuple_mk(n_items, ap);
+	struct tnt_stream *tuple = tuple_space_tuple_mk(n_items, items);
 
 	int ret = -1;
 	if (tuple) {
@@ -276,10 +308,10 @@ int __tuple_space_out(int n_items, ...) {
 	if (ret != -1)
 		log_t("Tuple successfully sent into tuple space");
 
-	va_end(ap);
 	return ret;
 }
 
+/*
 int __tuple_space_in(int n_items, ...) {
 	va_list ap;
 	va_start(ap, n_items);
@@ -311,3 +343,4 @@ int __tuple_space_in(int n_items, ...) {
 
 	return ret;
 }
+*/
