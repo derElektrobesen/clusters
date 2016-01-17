@@ -6,13 +6,35 @@
 
 #include "msgpuck/msgpuck.h"
 
+inline static void __tuple_space_tuple_add_STR(struct tnt_stream *tuple, const char *str) {
+	log_d("Trying to add string '%s' into tuple", str);
+	tnt_object_add_strz(tuple, str);
+}
+
+inline static void __tuple_space_tuple_add_INT(struct tnt_stream *tuple, int val) {
+	log_d("Trying to add integer '%d' into tuple", val);
+	tnt_object_add_int(tuple, val);
+}
+
+inline static void __tuple_space_tuple_add_FLOAT(struct tnt_stream *tuple, float val) {
+	log_d("Trying to add float '%f' into tuple", val);
+	tnt_object_add_float(tuple, val);
+}
+
+inline static void __tuple_space_tuple_add_DOUBLE(struct tnt_stream *tuple, double val) {
+	log_d("Trying to add double '%lf' into tuple", val);
+	tnt_object_add_double(tuple, val);
+}
+
 #define HELPER(_typename, _vartype, ...) \
 	inline static void __tuple_space_value_convertor_##_typename(struct tuple_space_elem_t *dest, void *data) { \
+		log_t("Arg value type is " #_typename); \
 		dest->elem_type = TUPLE_SPACE_VALUE_TYPE; \
 		dest->val_elem.value_type = __TUPLE_SPACE_VALUE_TYPE(_typename); \
 		dest->val_elem._typename = *(_vartype *)data; \
 	} \
 	inline static void __tuple_space_ref_convertor_##_typename(struct tuple_space_elem_t *dest, void *data) { \
+		log_t("Arg ref type is " #_typename); \
 		dest->elem_type = TUPLE_SPACE_REF_TYPE; \
 		dest->ref_elem.ref_type = __TUPLE_SPACE_VALUE_TYPE(_typename); \
 		dest->ref_elem._typename = *(_vartype **)data; \
@@ -140,13 +162,9 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 }
 
 static const char *tuple_space_types[TUPLE_SPACE_N_TYPES] = {
-	/* Stringify types */
-	"",
-#if 0
 #define HELPER(_typename, ...) [__TUPLE_SPACE_VALUE_TYPE(_typename)] = #_typename,
-	TUPLE_SPACE_SUPPORTED_TYPES(HELPER, __TUPLE_SPACE_SIMPLE_DEFAULT, __TUPLE_SPACE_ARRAY_OF_DEFAULT)
+	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
 #undef HELPER
-#endif
 };
 
 static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tuple_space_value_t *val) {
@@ -161,15 +179,12 @@ static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tupl
 	tnt_object_add_strz(tuple, tuple_space_types[val->value_type]);
 
 	switch (val->value_type) {
-#if 0
-#define HELPER(_typename, _vartype, _varname, tnt_suffix, _printf_spec)				\
+#define HELPER(_typename, ...)									\
 		case __TUPLE_SPACE_VALUE_TYPE(_typename):					\
-			log_d("Processing " #_typename " == '" _printf_spec "'", val->_varname);\
-			tnt_object_add_##tnt_suffix(tuple, val->_varname);			\
+			__tuple_space_tuple_add_##_typename(tuple, val->_typename);		\
 			break;
-		TUPLE_SPACE_SUPPORTED_TYPES(HELPER, __TUPLE_SPACE_SIMPLE_DEFAULT, __TUPLE_SPACE_ARRAY_OF_DEFAULT)
+		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
 #undef HELPER
-#endif
 		default:
 			log_e("Unknown value type found!");
 			return -1;
@@ -218,6 +233,7 @@ static struct tnt_stream *tuple_space_tuple_mk(int n_items, const struct tuple_s
 	int i = 0;
 	for (; !abort && i < n_items; ++i) {
 		const struct tuple_space_elem_t *elem = items + i;
+		log_t("Elem type is %d", elem->elem_type);
 		switch (elem->elem_type) {
 			case TUPLE_SPACE_VALUE_TYPE:
 				if (tuple_space_tuple_add_val(tuple, &elem->val_elem) == -1)
