@@ -149,7 +149,7 @@ __tuple_space_convertor_t __tuple_space_convertors[__TUPLE_SPACE_N_TYPES] = {
 #undef HELPER
 
 	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = __tuple_space_value_convertor_TUPLE,
-	[__TUPLE_SPACE_TUPLE_VARIABLE_MASK] = __tuple_space_value_convertor_MASK,
+	[__TUPLE_SPACE_MASK_VARIABLE_ANY] = __tuple_space_value_convertor_MASK,
 	[__TUPLE_SPACE_INVALID_TYPE] = __tuple_space_invalid_type,
 };
 
@@ -264,7 +264,7 @@ static const char *tuple_space_types[__TUPLE_SPACE_N_TYPES] = {
 	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
 	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = "TUPLE",
-	[__TUPLE_SPACE_TUPLE_VARIABLE_MASK] = "MASK",
+	[__TUPLE_SPACE_MASK_VARIABLE_ANY] = "MASK",
 };
 
 #ifdef DEBUG
@@ -278,7 +278,7 @@ const char *tuple_space_real_types[__TUPLE_SPACE_N_TYPES] = {
 	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
 	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = "__tuple__",
-	[__TUPLE_SPACE_TUPLE_VARIABLE_MASK] = "__mask__",
+	[__TUPLE_SPACE_MASK_VARIABLE_ANY] = "__mask_any__",
 	[__TUPLE_SPACE_INVALID_TYPE] = "__invalid__",
 };
 #endif
@@ -330,7 +330,7 @@ static int tuple_space_tuple_add_tuple(struct tnt_stream *tuple,
 		for (; i < val->n_items; ++i) {
 			switch (val->item_type) {
 #define HELPER(_type, _index, _typename)							\
-				case __VALUE_VAR(_typename, _index):						\
+				case __VALUE_VAR(_typename, _index):				\
 					__tuple_space_tuple_add_##_typename(tuple, val->__TYPENAME(_typename, _index)[i]); \
 					break;
 
