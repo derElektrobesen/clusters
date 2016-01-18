@@ -6,45 +6,55 @@
 #include "tuple_space_helpers.h"
 #include "utils.h"
 
-#define TUPLE_SPACE_SUPPORTED_TYPES_EX(_, ARR)							\
-	_(STR, char *, char *)									\
-	_(INT, int64_t, int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, int64_t, uint64_t) \
-	_(FLOAT, float, float)									\
-	_(DOUBLE, double, double)
+#define TUPLE_SPACE_SUPPORTED_TYPES(_, G)							\
+	_(G, STR, char *)									\
+	_(G, INT, int8_t, uint8_t, int16_t, uint16_t, int32_t, uint32_t, int64_t, uint64_t)	\
+	_(G, FLOAT, float)									\
+	_(G, DOUBLE, double)
 
-#define TUPLE_SPACE_DUMMY(a) a*
-#define TUPLE_SPACE_SUPPORTED_TYPES(_) TUPLE_SPACE_SUPPORTED_TYPES_EX(_, TUPLE_SPACE_DUMMY)
+#ifndef __CONCAT
+#define __CONCAT(x,y) x ## y
+#endif
 
 #define __TUPLE_SPACE_VALUE_TYPE(_type) TUPLE_SPACE_ELEM_TYPE_## _type
+#define __TYPENAME(_typename, _index) _typename##_##_index
+#define __CONCAT_EX(x, y) __CONCAT(x, y)
+#define __VALUE_VAR(_typename, _index) __CONCAT_EX(__TUPLE_SPACE_VALUE_VARIABLE_, __TYPENAME(_typename, _index))
+#define __REF_VAR(_typename, _index) __CONCAT_EX(__TUPLE_SPACE_REF_VARIABLE_, __TYPENAME(_typename, _index))
 
-enum tuple_space_value_type_t {
-	// Declare list of types supported (take first arg from supported_types)
-#define HELPER(_typename, ...) __TUPLE_SPACE_VALUE_TYPE(_typename),
-	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
-	TUPLE_SPACE_N_TYPES
-#undef HELPER
-};
+#define __TUPLE_SPACE_TYPES_GENERATOR_EX(GENERATOR, _typename, ...) \
+	FOR_EACH_UNDER_RECURSION(GENERATOR, _typename, ##__VA_ARGS__)
+
+// Call this macro to generate a list of variables
+// GENERATOR is a macro that takes 3 args: _type (char *), _index (var index) and _typename
+#define __TUPLE_SPACE_TYPES_GENERATOR(GENERATOR) \
+	TUPLE_SPACE_SUPPORTED_TYPES(__TUPLE_SPACE_TYPES_GENERATOR_EX, GENERATOR)
 
 enum tuple_space_variable_type_t {
-#define HELPER(_typename, ...) __TUPLE_SPACE_VALUE_VARIABLE_##_typename,
-	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+	// Generate list of supported types
+#define HELPER(_type, _index, _typename) __VALUE_VAR(_typename, _index),
+	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
-	__TUPLE_SPACE_VALUE_VARIABLE_MAX, // needed for unsupported refs finder
-#define HELPER(_typename, ...) __TUPLE_SPACE_REF_VARIABLE_##_typename,
-	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
-#undef HELPER
-	__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE,
-	__TUPLE_SPACE_INVALID_TYPE
-};
 
+	__TUPLE_SPACE_VALUE_VARIABLE_MAX,
+
+	// Generate list of references on supported types
+#define HELPER(_type, _index, _typename) __REF_VAR(_typename, _index),
+	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
+#undef HELPER
+
+	__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE,
+	__TUPLE_SPACE_INVALID_TYPE,
+	__TUPLE_SPACE_N_TYPES,
+};
 
 struct tuple_space_tuple_t {
 	union {
-#define HELPER(_varname, _vartype, ...) _vartype *_varname; /* array of type _vartype */
-		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#define HELPER(_type, _index, _typename) _type *__TYPENAME(_typename, _index); /* array of type _type */
+		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
-#define HELPER(_varname, _vartype, ...) _vartype **_varname##_PTR; /* pointer on array of type _vartype */
-		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#define HELPER(_type, _index, _typename) _type **__TYPENAME(_typename, _index##_PTR); /* pointer on array of type _vartype */
+		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
 	};
 
@@ -55,23 +65,23 @@ struct tuple_space_tuple_t {
 struct tuple_space_value_t {
 	// Declare number of values supported
 	union {
-#define HELPER(_varname, _vartype, ...) _vartype _varname;
-		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#define HELPER(_type, _index, _typename) _type __TYPENAME(_typename, _index);
+		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
 	};
 
-	enum tuple_space_value_type_t value_type;
+	enum tuple_space_variable_type_t value_type;
 };
 
 // Struct will contain a pointers on variables to store a tuple in
 struct tuple_space_ref_t {
 	union {
-#define HELPER(_varname, _vartype, ...) _vartype *_varname;
-		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#define HELPER(_type, _index, _typename) _type *__TYPENAME(_typename, _index);
+		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
 	};
 
-	enum tuple_space_value_type_t ref_type;
+	enum tuple_space_variable_type_t ref_type;
 };
 
 enum tuple_space_mask_type_t {
@@ -108,41 +118,36 @@ struct tuple_space_elem_t {
 typedef struct tuple_space_elem_t *(*__tuple_space_convertor_t)(struct tuple_space_elem_t *dest, void *data);
 extern __tuple_space_convertor_t __tuple_space_convertors[];
 
-#define __TUPLE_SPACE_TYPE_CHECKER(_type, _typename, _suffix)					\
+#define __GET_VARIABLE_TYPE(_suffix) __##_suffix##_VAR
+#define __TUPLE_SPACE_TYPE_CHECKER(_type, _typename, _res)					\
 	__builtin_choose_expr(									\
 		__builtin_types_compatible_p(__typeof(__var_ref), _type),			\
-		__TUPLE_SPACE_##_suffix##_VARIABLE_##_typename,
+		_res,
 
-#define __TUPLE_SPACE_TYPE_FINDER_HELPER(_type, _index, _typename)				\
-	__TUPLE_SPACE_TYPE_CHECKER(_type *, _typename, VALUE)					\
-	__TUPLE_SPACE_TYPE_CHECKER(const _type *, _typename, VALUE)				\
-	__TUPLE_SPACE_TYPE_CHECKER(_type const *, _typename, VALUE)				\
-	__TUPLE_SPACE_TYPE_CHECKER(_type **, _typename, REF)				\
-	__TUPLE_SPACE_TYPE_CHECKER(const _type **, _typename, REF)			\
-	__TUPLE_SPACE_TYPE_CHECKER(_type const **, _typename, REF)
+#define __TUPLE_SPACE_TYPE_FINDER_HELPER(_type, _index, _typename)					\
+	__TUPLE_SPACE_TYPE_CHECKER(_type *, _typename##_##_index, __VALUE_VAR(_typename, _index))	\
+	__TUPLE_SPACE_TYPE_CHECKER(const _type *, _typename##_##_index, __VALUE_VAR(_typename, _index))	\
+	__TUPLE_SPACE_TYPE_CHECKER(_type const *, _typename##_##_index, __VALUE_VAR(_typename, _index))	\
+	__TUPLE_SPACE_TYPE_CHECKER(_type **, _typename##_##_index, __REF_VAR(_typename, _index))	\
+	__TUPLE_SPACE_TYPE_CHECKER(const _type **, _typename##_##_index, __REF_VAR(_typename, _index))	\
+	__TUPLE_SPACE_TYPE_CHECKER(_type const **, _typename##_##_index, __REF_VAR(_typename, _index))
 
 // Close N breckets from previous macro
-#define __TUPLE_SPACE_TYPE_FINDER_CLOSER_EX(...) ))))))
-
-// Iterate over a list of types in each SUPPORTED_TYPE
-#define __TUPLE_SPACE_TYPE_FINDER(_typename, _var_type, ...)					\
-	FOR_EACH_UNDER_RECURSION(__TUPLE_SPACE_TYPE_FINDER_HELPER, _typename, ##__VA_ARGS__)
-#define __TUPLE_SPACE_TYPE_FINDER_CLOSER(_typename, _var_type, ...)				\
-	FOR_EACH_UNDER_RECURSION(__TUPLE_SPACE_TYPE_FINDER_CLOSER_EX, _typename, ##__VA_ARGS__)
+#define __TUPLE_SPACE_TYPE_FINDER_CLOSER(...) ))))))
 
 // Macro trying to deduct a type of variable given.
 // Result is an item of enum tuple_space_variable_type_t
 #define __TUPLE_SPACE_GET_TYPE(_var_) ({							\
 	__typeof(_var_) *__var_ref = &(_var_);							\
 	/* this will generate 1 more bracket (****) */						\
-	__TUPLE_SPACE_TYPE_CHECKER(struct tuple_space_tuple_t **, TUPLE, TUPLE)			\
-	TUPLE_SPACE_SUPPORTED_TYPES(__TUPLE_SPACE_TYPE_FINDER)					\
+	__TUPLE_SPACE_TYPE_CHECKER(struct tuple_space_tuple_t **, _unused_stuff_, __TUPLE_SPACE_TUPLE_VARIABLE_TUPLE) \
+	__TUPLE_SPACE_TYPES_GENERATOR(__TUPLE_SPACE_TYPE_FINDER_HELPER)				\
 	__TUPLE_SPACE_INVALID_TYPE  /* Type not found */					\
-	TUPLE_SPACE_SUPPORTED_TYPES(__TUPLE_SPACE_TYPE_FINDER_CLOSER)				\
+	__TUPLE_SPACE_TYPES_GENERATOR(__TUPLE_SPACE_TYPE_FINDER_CLOSER)				\
 	/* Close bracket, generated into (****) */ );						\
 })
 
-#define TUPLE_SPACE_POINTER_STORAGER(__val, __index, ...)					\
+#define TUPLE_SPACE_POINTER_STORAGER(__val, __index, __unused_stuff)				\
 	__typeof(__val) __element_##__index = __val;
 
 #define TUPLE_SPACE_TYPE_DEDUCTOR(__, _index, __ref_supported) ({				\

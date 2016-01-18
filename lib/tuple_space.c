@@ -13,8 +13,8 @@ inline static void __tuple_space_tuple_add_STR(struct tnt_stream *tuple, const c
 	tnt_object_add_strz(tuple, str);
 }
 
-inline static void __tuple_space_tuple_add_INT(struct tnt_stream *tuple, int val) {
-	log_d("Trying to add integer '%d' into tuple", val);
+inline static void __tuple_space_tuple_add_INT(struct tnt_stream *tuple, int64_t val) {
+	log_d("Trying to add integer '%" PRId64 "' into tuple", val);
 	tnt_object_add_int(tuple, val);
 }
 
@@ -28,29 +28,32 @@ inline static void __tuple_space_tuple_add_DOUBLE(struct tnt_stream *tuple, doub
 	tnt_object_add_double(tuple, val);
 }
 
-#define HELPER(_typename, _vartype, ...)							\
-	inline static struct tuple_space_elem_t *__tuple_space_value_convertor_##_typename	\
+#define __CONVERTOR(_c_type, _typename, _index)							\
+	__CONCAT_EX(__tuple_space_##_c_type##_convertor_, __TYPENAME(_typename, _index))
+
+#define HELPER(_type, _index, _typename)							\
+	inline static struct tuple_space_elem_t *__CONVERTOR(value, _typename, _index)		\
 			(struct tuple_space_elem_t *dest, void *data) __attribute__((nonnull));	\
-	inline static struct tuple_space_elem_t *__tuple_space_value_convertor_##_typename	\
+	inline static struct tuple_space_elem_t *__CONVERTOR(value, _typename, _index)		\
 			(struct tuple_space_elem_t *dest, void *data) {				\
-		log_t("Arg value type is " #_typename);						\
+		log_t("Arg value type is '" #_type "'");					\
 		dest->elem_type = TUPLE_SPACE_VALUE_TYPE;					\
-		dest->val_elem.value_type = __TUPLE_SPACE_VALUE_TYPE(_typename);		\
-		dest->val_elem._typename = *(_vartype *)data;					\
+		dest->val_elem.value_type = __VALUE_VAR(_typename, _index);			\
+		dest->val_elem.__TYPENAME(_typename, _index) = *(_type *)data;			\
 		return dest;									\
 	}											\
-	inline static struct tuple_space_elem_t *__tuple_space_ref_convertor_##_typename	\
+	inline static struct tuple_space_elem_t *__CONVERTOR(ref, _typename, _index)		\
 			(struct tuple_space_elem_t *dest, void *data) __attribute__((nonnull));	\
-	inline static struct tuple_space_elem_t *__tuple_space_ref_convertor_##_typename	\
+	inline static struct tuple_space_elem_t *__CONVERTOR(ref, _typename, _index)	\
 			(struct tuple_space_elem_t *dest, void *data) {				\
-		log_t("Arg ref type is " #_typename);						\
+		log_t("Arg type is a pointer on '" #_type "'");					\
 		dest->elem_type = TUPLE_SPACE_REF_TYPE;						\
-		dest->ref_elem.ref_type = __TUPLE_SPACE_VALUE_TYPE(_typename);			\
-		dest->ref_elem._typename = *(_vartype **)data;					\
+		dest->ref_elem.ref_type = __REF_VAR(_typename, _index);				\
+		dest->ref_elem.__TYPENAME(_typename, _index) = *(_type **)data;		\
 		return dest;									\
 	}
 
-TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 
 #undef HELPER
 
@@ -86,17 +89,17 @@ struct tuple_space_tuple_t *__tuple_space_mk_user_tuple(size_t n_items, void *it
 	log_t("Tuple contains %zu items", n_items);
 
 	switch (item_type) {
-#define HELPER(_typename, _vartype, ...)							\
-		case __TUPLE_SPACE_VALUE_VARIABLE_##_typename:					\
-			tup->_typename = (_vartype *)items;					\
-			log_t("Tuple items have a type " #_typename);				\
+#define HELPER(_type, _index, _typename)							\
+		case __VALUE_VAR(_typename, _index):						\
+			tup->__TYPENAME(_typename, _index) = (_type *)items;			\
+			log_t("Tuple items have a type '" #_type "'");				\
 			break;									\
-		case __TUPLE_SPACE_REF_VARIABLE_##_typename:					\
-			tup->_typename##_PTR = (_vartype **)items;				\
-			log_t("Tuple items have a type of pointers on " #_typename);		\
+		case __REF_VAR(_typename, _index):						\
+			tup->__TYPENAME(_typename, _index##_PTR) = (_type **)items;		\
+			log_t("Tuple items have a type of pointers on '" #_type "'");		\
 			break;
 
-		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 
 #undef HELPER
 		default:
@@ -107,13 +110,20 @@ struct tuple_space_tuple_t *__tuple_space_mk_user_tuple(size_t n_items, void *it
 	return tup;
 }
 
-__tuple_space_convertor_t __tuple_space_convertors[__TUPLE_SPACE_INVALID_TYPE + 1] = {
-#define HELPER(_typename, ...) [__TUPLE_SPACE_VALUE_VARIABLE_##_typename] = __tuple_space_value_convertor_##_typename,
-	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+__tuple_space_convertor_t __tuple_space_convertors[__TUPLE_SPACE_N_TYPES] = {
+#define HELPER(_type, _index, _typename)							\
+	[__VALUE_VAR(_typename, _index)] = __CONVERTOR(value, _typename, _index),
+
+	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
+
 #undef HELPER
-#define HELPER(_typename, ...) [__TUPLE_SPACE_REF_VARIABLE_##_typename] = __tuple_space_ref_convertor_##_typename,
-	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#define HELPER(_type, _index, _typename)							\
+	[__VALUE_VAR(_typename, _index)] = __CONVERTOR(ref, _typename, _index),
+
+	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
+
 #undef HELPER
+
 	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = __tuple_space_value_convertor_TUPLE,
 	[__TUPLE_SPACE_INVALID_TYPE] = __tuple_space_invalid_type,
 };
@@ -221,14 +231,18 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 	return tuple_space_connect(conn_timeout, req_timeout);
 }
 
-static const char *tuple_space_types[TUPLE_SPACE_N_TYPES] = {
-#define HELPER(_typename, ...) [__TUPLE_SPACE_VALUE_TYPE(_typename)] = #_typename,
-	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+static const char *tuple_space_types[__TUPLE_SPACE_N_TYPES] = {
+#define HELPER(_type, _index, _typename) [__VALUE_VAR(_typename, _index)] = #_typename,
+	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
+#define HELPER(_type, _index, _typename) [__REF_VAR(_typename, _index)] = #_typename,
+	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
+#undef HELPER
+	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = "TUPLE",
 };
 
 static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tuple_space_value_t *val) {
-	if (val->value_type < 0 || val->value_type >= TUPLE_SPACE_N_TYPES) {
+	if (val->value_type < 0 || val->value_type >= __TUPLE_SPACE_N_TYPES) {
 		log_e("Unknown value type found!");
 		return -1;
 	}
@@ -239,11 +253,11 @@ static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tupl
 	tnt_object_add_strz(tuple, tuple_space_types[val->value_type]);
 
 	switch (val->value_type) {
-#define HELPER(_typename, ...)									\
-		case __TUPLE_SPACE_VALUE_TYPE(_typename):					\
-			__tuple_space_tuple_add_##_typename(tuple, val->_typename);		\
+#define HELPER(_type, _index, _typename)							\
+		case __VALUE_VAR(_typename, _index):						\
+			__tuple_space_tuple_add_##_typename(tuple, val->__TYPENAME(_typename, _index)); \
 			break;
-		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
 		default:
 			log_e("Unknown value type found!");
