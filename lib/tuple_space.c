@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "tuple_space.h"
 
 #include "tarantool/tarantool.h"
@@ -26,35 +28,93 @@ inline static void __tuple_space_tuple_add_DOUBLE(struct tnt_stream *tuple, doub
 	tnt_object_add_double(tuple, val);
 }
 
-#define HELPER(_typename, _vartype, ...) \
-	inline static void __tuple_space_value_convertor_##_typename(struct tuple_space_elem_t *dest, void *data) { \
-		log_t("Arg value type is " #_typename); \
-		dest->elem_type = TUPLE_SPACE_VALUE_TYPE; \
-		dest->val_elem.value_type = __TUPLE_SPACE_VALUE_TYPE(_typename); \
-		dest->val_elem._typename = *(_vartype *)data; \
-	} \
-	inline static void __tuple_space_ref_convertor_##_typename(struct tuple_space_elem_t *dest, void *data) { \
-		log_t("Arg ref type is " #_typename); \
-		dest->elem_type = TUPLE_SPACE_REF_TYPE; \
-		dest->ref_elem.ref_type = __TUPLE_SPACE_VALUE_TYPE(_typename); \
-		dest->ref_elem._typename = *(_vartype **)data; \
+#define HELPER(_typename, _vartype, ...)							\
+	inline static struct tuple_space_elem_t *__tuple_space_value_convertor_##_typename	\
+			(struct tuple_space_elem_t *dest, void *data) __attribute__((nonnull));	\
+	inline static struct tuple_space_elem_t *__tuple_space_value_convertor_##_typename	\
+			(struct tuple_space_elem_t *dest, void *data) {				\
+		log_t("Arg value type is " #_typename);						\
+		dest->elem_type = TUPLE_SPACE_VALUE_TYPE;					\
+		dest->val_elem.value_type = __TUPLE_SPACE_VALUE_TYPE(_typename);		\
+		dest->val_elem._typename = *(_vartype *)data;					\
+		return dest;									\
+	}											\
+	inline static struct tuple_space_elem_t *__tuple_space_ref_convertor_##_typename	\
+			(struct tuple_space_elem_t *dest, void *data) __attribute__((nonnull));	\
+	inline static struct tuple_space_elem_t *__tuple_space_ref_convertor_##_typename	\
+			(struct tuple_space_elem_t *dest, void *data) {				\
+		log_t("Arg ref type is " #_typename);						\
+		dest->elem_type = TUPLE_SPACE_REF_TYPE;						\
+		dest->ref_elem.ref_type = __TUPLE_SPACE_VALUE_TYPE(_typename);			\
+		dest->ref_elem._typename = *(_vartype **)data;					\
+		return dest;									\
 	}
 
 TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
 
 #undef HELPER
 
-static void __tuple_space_invalid_type(struct tuple_space_elem_t *dest __attribute__((unused)), void *data __attribute__((unused))) {
+// A pointer on variable which contains a pointer on a tuple (which is allocated on heap) should be passed in data
+inline static struct tuple_space_elem_t *__tuple_space_value_convertor_TUPLE(struct tuple_space_elem_t *dest, void *data) {
+	struct tuple_space_tuple_t *passed_tuple = *(struct tuple_space_tuple_t **)data;
+
+	memcpy(&dest->tuple_elem, passed_tuple, sizeof(dest->tuple_elem));
+	dest->elem_type = TUPLE_SPACE_TUPLE_TYPE;
+
+	log_t("Arg is a Tuple of size %zu", dest->tuple_elem.n_items);
+
+	// XXX: Passed tuple should be generated with TUPLE() macro
+	log_t("Freeing a generated Tuple...");
+	free(passed_tuple);
+
+	return dest;
+}
+
+static struct tuple_space_elem_t *__tuple_space_invalid_type(struct tuple_space_elem_t *dest __attribute__((unused)),
+		void *data __attribute__((unused))) {
 	assert(!"Trying to send into tuple space a value of unknown type!");
+	return NULL;
+}
+
+// A pointer on array of items of type item_type should be passed in items
+struct tuple_space_tuple_t *__tuple_space_mk_user_tuple(size_t n_items, void *items,
+		enum tuple_space_variable_type_t item_type) {
+	struct tuple_space_tuple_t *tup = malloc(sizeof(struct tuple_space_tuple_t));
+	tup->item_type = item_type;
+	tup->n_items = n_items;
+
+	log_t("Tuple contains %zu items", n_items);
+
+	switch (item_type) {
+#define HELPER(_typename, _vartype, ...)							\
+		case __TUPLE_SPACE_VALUE_VARIABLE_##_typename:					\
+			tup->_typename = (_vartype *)items;					\
+			log_t("Tuple items have a type " #_typename);				\
+			break;									\
+		case __TUPLE_SPACE_REF_VARIABLE_##_typename:					\
+			tup->_typename##_PTR = (_vartype **)items;				\
+			log_t("Tuple items have a type of pointers on " #_typename);		\
+			break;
+
+		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+
+#undef HELPER
+		default:
+			log_e("Unsupported tuple element type: %d!", item_type);
+			assert(0);
+	};
+
+	return tup;
 }
 
 __tuple_space_convertor_t __tuple_space_convertors[__TUPLE_SPACE_INVALID_TYPE + 1] = {
-#define HELPER(_typename, ...) [__TUPLE_SPACE_VALUE_TYPE(_typename)] = __tuple_space_value_convertor_##_typename,
+#define HELPER(_typename, ...) [__TUPLE_SPACE_VALUE_VARIABLE_##_typename] = __tuple_space_value_convertor_##_typename,
 	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
 #undef HELPER
-#define HELPER(_typename, ...) [TUPLE_SPACE_N_TYPES + __TUPLE_SPACE_VALUE_TYPE(_typename)] = __tuple_space_ref_convertor_##_typename,
+#define HELPER(_typename, ...) [__TUPLE_SPACE_REF_VARIABLE_##_typename] = __tuple_space_ref_convertor_##_typename,
 	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
 #undef HELPER
+	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = __tuple_space_value_convertor_TUPLE,
 	[__TUPLE_SPACE_INVALID_TYPE] = __tuple_space_invalid_type,
 };
 

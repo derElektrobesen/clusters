@@ -25,15 +25,31 @@ enum tuple_space_value_type_t {
 #undef HELPER
 };
 
+enum tuple_space_variable_type_t {
+#define HELPER(_typename, ...) __TUPLE_SPACE_VALUE_VARIABLE_##_typename,
+	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#undef HELPER
+	__TUPLE_SPACE_VALUE_VARIABLE_MAX, // needed for unsupported refs finder
+#define HELPER(_typename, ...) __TUPLE_SPACE_REF_VARIABLE_##_typename,
+	TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#undef HELPER
+	__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE,
+	__TUPLE_SPACE_INVALID_TYPE
+};
+
+
 struct tuple_space_tuple_t {
 	union {
-#define HELPER(_varname, _vartype, ...) _vartype _varname;
+#define HELPER(_varname, _vartype, ...) _vartype *_varname; /* array of type _vartype */
 		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
 #undef HELPER
-	} *values;
+#define HELPER(_varname, _vartype, ...) _vartype **_varname##_PTR; /* pointer on array of type _vartype */
+		TUPLE_SPACE_SUPPORTED_TYPES(HELPER)
+#undef HELPER
+	};
 
-	int n_values;
-	enum tuple_space_value_type_t value_type;
+	size_t n_items;
+	enum tuple_space_variable_type_t item_type;
 };
 
 struct tuple_space_value_t {
@@ -89,24 +105,23 @@ struct tuple_space_elem_t {
 	};
 };
 
-typedef void (*__tuple_space_convertor_t)(struct tuple_space_elem_t *dest, void *data);
+typedef struct tuple_space_elem_t *(*__tuple_space_convertor_t)(struct tuple_space_elem_t *dest, void *data);
 extern __tuple_space_convertor_t __tuple_space_convertors[];
 
-#define __TUPLE_SPACE_INVALID_TYPE (TUPLE_SPACE_N_TYPES * 2)
-
-#define __TUPLE_SPACE_TYPE_CHECKER(_type, _typename, _off)					\
+#define __TUPLE_SPACE_TYPE_CHECKER(_type, _typename, _suffix)					\
 	__builtin_choose_expr(									\
 		__builtin_types_compatible_p(__typeof(__var_ref), _type),			\
-		(_off + __TUPLE_SPACE_VALUE_TYPE(_typename)),
+		__TUPLE_SPACE_##_suffix##_VARIABLE_##_typename,
 
 #define __TUPLE_SPACE_TYPE_FINDER_HELPER(_type, _index, _typename)				\
-	__TUPLE_SPACE_TYPE_CHECKER(_type *, _typename, 0)					\
-	__TUPLE_SPACE_TYPE_CHECKER(const _type *, _typename, 0)					\
-	__TUPLE_SPACE_TYPE_CHECKER(_type const *, _typename, 0)					\
-	__TUPLE_SPACE_TYPE_CHECKER(_type **, _typename, TUPLE_SPACE_N_TYPES)			\
-	__TUPLE_SPACE_TYPE_CHECKER(const _type **, _typename, TUPLE_SPACE_N_TYPES)		\
-	__TUPLE_SPACE_TYPE_CHECKER(_type const **, _typename, TUPLE_SPACE_N_TYPES)
+	__TUPLE_SPACE_TYPE_CHECKER(_type *, _typename, VALUE)					\
+	__TUPLE_SPACE_TYPE_CHECKER(const _type *, _typename, VALUE)				\
+	__TUPLE_SPACE_TYPE_CHECKER(_type const *, _typename, VALUE)				\
+	__TUPLE_SPACE_TYPE_CHECKER(_type **, _typename, REF)				\
+	__TUPLE_SPACE_TYPE_CHECKER(const _type **, _typename, REF)			\
+	__TUPLE_SPACE_TYPE_CHECKER(_type const **, _typename, REF)
 
+// Close N breckets from previous macro
 #define __TUPLE_SPACE_TYPE_FINDER_CLOSER_EX(...) ))))))
 
 // Iterate over a list of types in each SUPPORTED_TYPE
@@ -115,11 +130,16 @@ extern __tuple_space_convertor_t __tuple_space_convertors[];
 #define __TUPLE_SPACE_TYPE_FINDER_CLOSER(_typename, _var_type, ...)				\
 	FOR_EACH_UNDER_RECURSION(__TUPLE_SPACE_TYPE_FINDER_CLOSER_EX, _typename, ##__VA_ARGS__)
 
+// Macro trying to deduct a type of variable given.
+// Result is an item of enum tuple_space_variable_type_t
 #define __TUPLE_SPACE_GET_TYPE(_var_) ({							\
-	__typeof(_var_) *__var_ref = &_var_;							\
+	__typeof(_var_) *__var_ref = &(_var_);							\
+	/* this will generate 1 more bracket (****) */						\
+	__TUPLE_SPACE_TYPE_CHECKER(struct tuple_space_tuple_t **, TUPLE, TUPLE)			\
 	TUPLE_SPACE_SUPPORTED_TYPES(__TUPLE_SPACE_TYPE_FINDER)					\
 	__TUPLE_SPACE_INVALID_TYPE  /* Type not found */					\
-	TUPLE_SPACE_SUPPORTED_TYPES(__TUPLE_SPACE_TYPE_FINDER_CLOSER);				\
+	TUPLE_SPACE_SUPPORTED_TYPES(__TUPLE_SPACE_TYPE_FINDER_CLOSER)				\
+	/* Close bracket, generated into (****) */ );						\
 })
 
 #define TUPLE_SPACE_POINTER_STORAGER(__val, __index, ...)					\
@@ -127,11 +147,14 @@ extern __tuple_space_convertor_t __tuple_space_convertors[];
 
 #define TUPLE_SPACE_TYPE_DEDUCTOR(__, _index, __ref_supported) ({				\
 	log_t("Trying to deduct type of arg #%d", _index);					\
-	__tuple_space_convertors[(!__ref_supported						\
-			&& (__TUPLE_SPACE_GET_TYPE(__element_##_index) >= TUPLE_SPACE_N_TYPES)	\
-			&& (__TUPLE_SPACE_GET_TYPE(__element_##_index) < __TUPLE_SPACE_INVALID_TYPE)) \
-		? __TUPLE_SPACE_INVALID_TYPE :							\
-		__TUPLE_SPACE_GET_TYPE(__element_##_index)](__tuple_end_ptr - _index, &__element_##_index); \
+	const int __value_type = __TUPLE_SPACE_GET_TYPE(__element_##_index);			\
+	__tuple_space_convertors[								\
+		(!__ref_supported								\
+			&& (__value_type != __TUPLE_SPACE_TUPLE_VARIABLE_TUPLE)			\
+			&& (__value_type >= __TUPLE_SPACE_VALUE_VARIABLE_MAX)			\
+			&& (__value_type < __TUPLE_SPACE_INVALID_TYPE))				\
+		? __TUPLE_SPACE_INVALID_TYPE							\
+		: __value_type ](__tuple_end_ptr - _index, &__element_##_index);		\
 });
 
 #define __tuple_space_wrapper(callback, __ref_supported, ...) ({				\
@@ -147,8 +170,13 @@ extern __tuple_space_convertor_t __tuple_space_convertors[];
 	callback(ARGS_COUNT(__VA_ARGS__), __real_tuple);					\
 })
 
+#define TUPLE(n_items, items) \
+	__tuple_space_mk_user_tuple((n_items), (items), __TUPLE_SPACE_GET_TYPE(*(items)))
+
 #define tuple_space_out(...) __tuple_space_wrapper(__tuple_space_out, 0, ##__VA_ARGS__)
 
+struct tuple_space_tuple_t *__tuple_space_mk_user_tuple(size_t n_items, void *items,
+		enum tuple_space_variable_type_t item_type) __attribute__((nonnull));
 int __tuple_space_out(int n_elems, const struct tuple_space_elem_t *elems);
 
 #endif // __TUPLE_SPACE_H__
