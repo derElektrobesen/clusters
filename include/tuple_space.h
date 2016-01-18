@@ -45,6 +45,8 @@ enum tuple_space_variable_type_t {
 #undef HELPER
 
 	__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE,
+	__TUPLE_SPACE_TUPLE_VARIABLE_MASK,
+
 	__TUPLE_SPACE_INVALID_TYPE,
 	__TUPLE_SPACE_N_TYPES,
 };
@@ -142,10 +144,11 @@ extern const char *tuple_space_real_types[];
 	__typeof(_var_) *__var_ref = &(_var_);							\
 	/* this will generate 1 more bracket (****) */						\
 	__TUPLE_SPACE_TYPE_CHECKER(struct tuple_space_tuple_t **, _unused_stuff_, __TUPLE_SPACE_TUPLE_VARIABLE_TUPLE) \
+	__TUPLE_SPACE_TYPE_CHECKER(struct tuple_space_mask_t **, _unused_stuff_, __TUPLE_SPACE_TUPLE_VARIABLE_MASK) \
 	__TUPLE_SPACE_TYPES_GENERATOR(__TUPLE_SPACE_TYPE_FINDER_HELPER)				\
 	__TUPLE_SPACE_INVALID_TYPE  /* Type not found */					\
 	__TUPLE_SPACE_TYPES_GENERATOR(__TUPLE_SPACE_TYPE_FINDER_CLOSER)				\
-	/* Close bracket, generated into (****) */ );						\
+	/* Close brackets, generated into (****) */ ));						\
 })
 
 #define TUPLE_SPACE_POINTER_STORAGER(__val, __index, __unused_stuff)				\
@@ -162,7 +165,10 @@ extern const char *tuple_space_real_types[];
 	__tuple_space_convertors[								\
 		(!__ref_supported								\
 			&& (__value_type != __TUPLE_SPACE_TUPLE_VARIABLE_TUPLE)			\
-			&& (__value_type >= __TUPLE_SPACE_VALUE_VARIABLE_MAX))			\
+			&& (									\
+				(__value_type >= __TUPLE_SPACE_VALUE_VARIABLE_MAX)		\
+				|| __value_type == __TUPLE_SPACE_TUPLE_VARIABLE_MASK)		\
+			)									\
 		? __TUPLE_SPACE_INVALID_TYPE							\
 		: __value_type ](__tuple_end_ptr - _index, &__element_##_index);		\
 });
@@ -185,11 +191,14 @@ extern const char *tuple_space_real_types[];
 #define TUPLE(n_items, items) \
 	__tuple_space_mk_user_tuple((n_items), (items), __TUPLE_SPACE_GET_TYPE(*(items)))
 
+#define ANY __tuple_space_mk_user_mask(TUPLE_SPACE_MASK_TYPE_ANY)
+
 #define tuple_space_out(...) __tuple_space_wrapper(__tuple_space_out, 0, ##__VA_ARGS__)
 #define tuple_space_in(...) __tuple_space_wrapper(__tuple_space_in, 1, ##__VA_ARGS__)
 
 struct tuple_space_tuple_t *__tuple_space_mk_user_tuple(size_t n_items, void *items,
 		enum tuple_space_variable_type_t item_type) __attribute__((nonnull));
+struct tuple_space_mask_t *__tuple_space_mk_user_mask(enum tuple_space_mask_type_t mask_type);
 
 int __tuple_space_out(int n_elems, const struct tuple_space_elem_t *elems);
 int __tuple_space_in(int n_elems, struct tuple_space_elem_t *elems);

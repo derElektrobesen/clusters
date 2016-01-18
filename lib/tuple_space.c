@@ -64,11 +64,27 @@ inline static struct tuple_space_elem_t *__tuple_space_value_convertor_TUPLE(str
 	memcpy(&dest->tuple_elem, passed_tuple, sizeof(dest->tuple_elem));
 	dest->elem_type = TUPLE_SPACE_TUPLE_TYPE;
 
-	log_t("Arg is a Tuple of size %zu", dest->tuple_elem.n_items);
+	log_d("Arg is a Tuple of size %zu", dest->tuple_elem.n_items);
 
 	// XXX: Passed tuple should be generated with TUPLE() macro
 	log_t("Freeing a generated Tuple...");
 	free(passed_tuple);
+
+	return dest;
+}
+
+// A pointer on variable which contains a pointer on a mask (which is allocated on heap) should be passed in data
+inline static struct tuple_space_elem_t *__tuple_space_value_convertor_MASK(struct tuple_space_elem_t *dest, void *data) {
+	struct tuple_space_mask_t *passed_mask = *(struct tuple_space_mask_t **)data;
+
+	memcpy(&dest->mask_elem, passed_mask , sizeof(dest->mask_elem));
+	dest->elem_type = TUPLE_SPACE_MASK_TYPE;
+
+	log_d("Arg is a Mask of type %d", dest->mask_elem.mask_type);
+
+	// XXX: Passed tuple should be generated with TUPLE() macro
+	log_t("Freeing a generated Mask...");
+	free(passed_mask);
 
 	return dest;
 }
@@ -110,6 +126,14 @@ struct tuple_space_tuple_t *__tuple_space_mk_user_tuple(size_t n_items, void *it
 	return tup;
 }
 
+struct tuple_space_mask_t *__tuple_space_mk_user_mask(enum tuple_space_mask_type_t mask_type) {
+	struct tuple_space_mask_t *mask = malloc(sizeof(struct tuple_space_mask_t));
+
+	mask->mask_type = mask_type;
+
+	return mask;
+}
+
 __tuple_space_convertor_t __tuple_space_convertors[__TUPLE_SPACE_N_TYPES] = {
 #define HELPER(_type, _index, _typename)							\
 	[__VALUE_VAR(_typename, _index)] = __CONVERTOR(value, _typename, _index),
@@ -125,6 +149,7 @@ __tuple_space_convertor_t __tuple_space_convertors[__TUPLE_SPACE_N_TYPES] = {
 #undef HELPER
 
 	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = __tuple_space_value_convertor_TUPLE,
+	[__TUPLE_SPACE_TUPLE_VARIABLE_MASK] = __tuple_space_value_convertor_MASK,
 	[__TUPLE_SPACE_INVALID_TYPE] = __tuple_space_invalid_type,
 };
 
@@ -239,6 +264,7 @@ static const char *tuple_space_types[__TUPLE_SPACE_N_TYPES] = {
 	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
 	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = "TUPLE",
+	[__TUPLE_SPACE_TUPLE_VARIABLE_MASK] = "MASK",
 };
 
 #ifdef DEBUG
@@ -252,6 +278,7 @@ const char *tuple_space_real_types[__TUPLE_SPACE_N_TYPES] = {
 	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
 	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = "__tuple__",
+	[__TUPLE_SPACE_TUPLE_VARIABLE_MASK] = "__mask__",
 	[__TUPLE_SPACE_INVALID_TYPE] = "__invalid__",
 };
 #endif
@@ -334,24 +361,22 @@ static int tuple_space_tuple_add_type(struct tnt_stream *tuple, const struct tup
 	return 0;
 }
 
-/*
-static int tuple_space_tuple_add_mask(struct tnt_stream *tuple, const enum tuple_space_elem_mask_type_t *val) {
-	if (*val < 0 || *val >= TUPLE_SPACE_MASK_MAX) {
-		log_e("Unknown value type found!");
-		return -1;
-	}
+static int tuple_space_tuple_add_mask(struct tnt_stream *tuple, const struct tuple_space_mask_t *val) {
+	if (val->mask_type < 0 || val->mask_type >= TUPLE_SPACE_MASK_TYPE_MAX)
+		assert(!"Invalid mask type passed!");
 
-	static const char *masks_types[TUPLE_SPACE_MASK_MAX] = {
-		[TUPLE_SPACE_MASK_ANY] = "ANY",
+	static const char *masks_types[TUPLE_SPACE_MASK_TYPE_MAX] = {
+		[TUPLE_SPACE_MASK_TYPE_ANY] = "ANY",
 	};
+
+	log_t("Masktype found");
 
 	tnt_object_add_array(tuple, 2); // first arg is elemnt type, second is element value
 	tnt_object_add_strz(tuple, "MASK");
-	tnt_object_add_strz(tuple, masks_types[*val]);
+	tnt_object_add_strz(tuple, masks_types[val->mask_type]);
 
 	return 0;
 }
-*/
 
 static struct tnt_stream *tuple_space_tuple_mk(int n_items, const struct tuple_space_elem_t *items, int read_only) {
 	struct tnt_stream *tuple = tnt_object(NULL);
@@ -373,8 +398,8 @@ static struct tnt_stream *tuple_space_tuple_mk(int n_items, const struct tuple_s
 					abort = 1;
 				break;
 			case TUPLE_SPACE_MASK_TYPE:
-				// TODO
-				log_t("Masktype found");
+				if (tuple_space_tuple_add_mask(tuple, &elem->mask_elem) == -1)
+					abort = 1;
 				break;
 			case TUPLE_SPACE_TUPLE_TYPE:
 				if (tuple_space_tuple_add_tuple(tuple, &elem->tuple_elem, read_only) == -1)
