@@ -44,7 +44,7 @@ inline static void __tuple_space_tuple_add_DOUBLE(struct tnt_stream *tuple, doub
 	}											\
 	inline static struct tuple_space_elem_t *__CONVERTOR(ref, _typename, _index)		\
 			(struct tuple_space_elem_t *dest, void *data) __attribute__((nonnull));	\
-	inline static struct tuple_space_elem_t *__CONVERTOR(ref, _typename, _index)	\
+	inline static struct tuple_space_elem_t *__CONVERTOR(ref, _typename, _index)		\
 			(struct tuple_space_elem_t *dest, void *data) {				\
 		log_t("Arg type is a pointer on '" #_type "'");					\
 		dest->elem_type = TUPLE_SPACE_REF_TYPE;						\
@@ -82,7 +82,7 @@ inline static struct tuple_space_elem_t *__tuple_space_value_convertor_MASK(stru
 
 	log_d("Arg is a Mask of type %d", dest->mask_elem.mask_type);
 
-	// XXX: Passed tuple should be generated with TUPLE() macro
+	// XXX: Passed mask should be generated with ANY (or same) macro
 	log_t("Freeing a generated Mask...");
 	free(passed_mask);
 

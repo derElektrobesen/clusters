@@ -28,7 +28,7 @@
 
 // Call this macro to generate a list of variables
 // GENERATOR is a macro that takes 3 args: _type (char *), _index (var index) and _typename
-#define __TUPLE_SPACE_TYPES_GENERATOR(GENERATOR) \
+#define __TUPLE_SPACE_TYPES_GENERATOR(GENERATOR)						\
 	TUPLE_SPACE_SUPPORTED_TYPES(__TUPLE_SPACE_TYPES_GENERATOR_EX, GENERATOR)
 
 enum tuple_space_variable_type_t {
