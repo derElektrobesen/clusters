@@ -2,6 +2,7 @@
 #define __TUPLE_SPACE_H__
 
 #include <assert.h>
+#include <string.h>
 
 #include "tuple_space_helpers.h"
 #include "utils.h"
@@ -51,9 +52,6 @@ enum tuple_space_variable_type_t {
 struct tuple_space_tuple_t {
 	union {
 #define HELPER(_type, _index, _typename) _type *__TYPENAME(_typename, _index); /* array of type _type */
-		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-#undef HELPER
-#define HELPER(_type, _index, _typename) _type **__TYPENAME(_typename, _index##_PTR); /* pointer on array of type _vartype */
 		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 #undef HELPER
 	};
@@ -118,7 +116,10 @@ struct tuple_space_elem_t {
 typedef struct tuple_space_elem_t *(*__tuple_space_convertor_t)(struct tuple_space_elem_t *dest, void *data);
 extern __tuple_space_convertor_t __tuple_space_convertors[];
 
-#define __GET_VARIABLE_TYPE(_suffix) __##_suffix##_VAR
+#ifdef DEBUG
+extern const char *tuple_space_real_types[];
+#endif
+
 #define __TUPLE_SPACE_TYPE_CHECKER(_type, _typename, _res)					\
 	__builtin_choose_expr(									\
 		__builtin_types_compatible_p(__typeof(__var_ref), _type),			\
@@ -150,14 +151,18 @@ extern __tuple_space_convertor_t __tuple_space_convertors[];
 #define TUPLE_SPACE_POINTER_STORAGER(__val, __index, __unused_stuff)				\
 	__typeof(__val) __element_##__index = __val;
 
+#define SHOW_DEDUCTED_TYPE(__value_type)							\
+	log_t("Variable type was deducted to '%s'", tuple_space_real_types[__value_type]);	\
+
 #define TUPLE_SPACE_TYPE_DEDUCTOR(__, _index, __ref_supported) ({				\
 	log_t("Trying to deduct type of arg #%d", _index);					\
 	const int __value_type = __TUPLE_SPACE_GET_TYPE(__element_##_index);			\
+												\
+	SHOW_DEDUCTED_TYPE(__value_type)							\
 	__tuple_space_convertors[								\
 		(!__ref_supported								\
 			&& (__value_type != __TUPLE_SPACE_TUPLE_VARIABLE_TUPLE)			\
-			&& (__value_type >= __TUPLE_SPACE_VALUE_VARIABLE_MAX)			\
-			&& (__value_type < __TUPLE_SPACE_INVALID_TYPE))				\
+			&& (__value_type >= __TUPLE_SPACE_VALUE_VARIABLE_MAX))			\
 		? __TUPLE_SPACE_INVALID_TYPE							\
 		: __value_type ](__tuple_end_ptr - _index, &__element_##_index);		\
 });
@@ -168,6 +173,8 @@ extern __tuple_space_convertor_t __tuple_space_convertors[];
 												\
 	/* Declare list of elements to store a tuple */						\
 	struct tuple_space_elem_t __real_tuple[ARGS_COUNT(__VA_ARGS__)];			\
+	memset(__real_tuple, 0, sizeof(*__real_tuple));						\
+												\
 	struct tuple_space_elem_t *__tuple_end_ptr = __real_tuple + ARGS_COUNT(__VA_ARGS__) - 1;\
 	FOR_EACH(TUPLE_SPACE_TYPE_DEDUCTOR, __ref_supported, ##__VA_ARGS__)			\
 												\
@@ -179,9 +186,18 @@ extern __tuple_space_convertor_t __tuple_space_convertors[];
 	__tuple_space_mk_user_tuple((n_items), (items), __TUPLE_SPACE_GET_TYPE(*(items)))
 
 #define tuple_space_out(...) __tuple_space_wrapper(__tuple_space_out, 0, ##__VA_ARGS__)
+#define tuple_space_in(...) __tuple_space_wrapper(__tuple_space_in, 1, ##__VA_ARGS__)
 
 struct tuple_space_tuple_t *__tuple_space_mk_user_tuple(size_t n_items, void *items,
 		enum tuple_space_variable_type_t item_type) __attribute__((nonnull));
+
 int __tuple_space_out(int n_elems, const struct tuple_space_elem_t *elems);
+int __tuple_space_in(int n_elems, struct tuple_space_elem_t *elems);
+
+#define tuple_space_set_configuration(host, port)						\
+	tuple_space_set_configuration_ex(host, port, NULL, NULL)
+
+int tuple_space_set_configuration_ex(const char *host, uint16_t port,
+		struct timeval *conn_timeout, struct timeval *req_timeout);
 
 #endif // __TUPLE_SPACE_H__

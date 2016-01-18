@@ -49,7 +49,7 @@ inline static void __tuple_space_tuple_add_DOUBLE(struct tnt_stream *tuple, doub
 		log_t("Arg type is a pointer on '" #_type "'");					\
 		dest->elem_type = TUPLE_SPACE_REF_TYPE;						\
 		dest->ref_elem.ref_type = __REF_VAR(_typename, _index);				\
-		dest->ref_elem.__TYPENAME(_typename, _index) = *(_type **)data;		\
+		dest->ref_elem.__TYPENAME(_typename, _index) = *(_type **)data;			\
 		return dest;									\
 	}
 
@@ -95,8 +95,8 @@ struct tuple_space_tuple_t *__tuple_space_mk_user_tuple(size_t n_items, void *it
 			log_t("Tuple items have a type '" #_type "'");				\
 			break;									\
 		case __REF_VAR(_typename, _index):						\
-			tup->__TYPENAME(_typename, _index##_PTR) = (_type **)items;		\
-			log_t("Tuple items have a type of pointers on '" #_type "'");		\
+			assert("Tuple can't contain references on type '" #_type "'. "		\
+					"Only values are supported.");				\
 			break;
 
 		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
@@ -105,7 +105,7 @@ struct tuple_space_tuple_t *__tuple_space_mk_user_tuple(size_t n_items, void *it
 		default:
 			log_e("Unsupported tuple element type: %d!", item_type);
 			assert(0);
-	};
+	}
 
 	return tup;
 }
@@ -118,7 +118,7 @@ __tuple_space_convertor_t __tuple_space_convertors[__TUPLE_SPACE_N_TYPES] = {
 
 #undef HELPER
 #define HELPER(_type, _index, _typename)							\
-	[__VALUE_VAR(_typename, _index)] = __CONVERTOR(ref, _typename, _index),
+	[__REF_VAR(_typename, _index)] = __CONVERTOR(ref, _typename, _index),
 
 	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
 
@@ -241,8 +241,23 @@ static const char *tuple_space_types[__TUPLE_SPACE_N_TYPES] = {
 	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = "TUPLE",
 };
 
+#ifdef DEBUG
+const char *tuple_space_real_types[__TUPLE_SPACE_N_TYPES] = {
+	// For debug purposes
+#define HELPER(_type, _index, _typename) [__VALUE_VAR(_typename, _index)] = #_type,
+	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
+#undef HELPER
+	[__TUPLE_SPACE_VALUE_VARIABLE_MAX] = "__invalid_var__",
+#define HELPER(_type, _index, _typename) [__REF_VAR(_typename, _index)] = __STRING(_type *),
+	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
+#undef HELPER
+	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = "__tuple__",
+	[__TUPLE_SPACE_INVALID_TYPE] = "__invalid__",
+};
+#endif
+
 static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tuple_space_value_t *val) {
-	if (val->value_type < 0 || val->value_type >= __TUPLE_SPACE_N_TYPES) {
+	if (val->value_type < 0 || val->value_type >= __TUPLE_SPACE_VALUE_VARIABLE_MAX) {
 		log_e("Unknown value type found!");
 		return -1;
 	}
@@ -257,29 +272,69 @@ static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tupl
 		case __VALUE_VAR(_typename, _index):						\
 			__tuple_space_tuple_add_##_typename(tuple, val->__TYPENAME(_typename, _index)); \
 			break;
+
 		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
+
 #undef HELPER
 		default:
 			log_e("Unknown value type found!");
 			return -1;
-	};
+	}
+	return 0;
+}
+
+static int tuple_space_tuple_add_tuple(struct tnt_stream *tuple,
+		const struct tuple_space_tuple_t *val, int read_only) {
+	if (val->item_type < 0 || val->item_type >= __TUPLE_SPACE_VALUE_VARIABLE_MAX) {
+		assert(!"Tuple shouldn't contain non-values variables");
+	}
+
+	log_d("Sending tuple of type %s", tuple_space_types[val->item_type]);
+
+	tnt_object_add_array(tuple, 3 + (read_only ? 0 : 1));
+	tnt_object_add_strz(tuple, "TUPLE");
+	tnt_object_add_strz(tuple, tuple_space_types[val->item_type]);
+	tnt_object_add_int(tuple, val->n_items);
+
+	if (!read_only) {
+		tnt_object_add_array(tuple, val->n_items);
+
+		int i = 0;
+		for (; i < val->n_items; ++i) {
+			switch (val->item_type) {
+#define HELPER(_type, _index, _typename)							\
+				case __VALUE_VAR(_typename, _index):						\
+					__tuple_space_tuple_add_##_typename(tuple, val->__TYPENAME(_typename, _index)[i]); \
+					break;
+
+				__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
+
+#undef HELPER
+				default:
+					log_e("Unknown value type found!");
+					return -1;
+			}
+		}
+	}
+
+	return 0;
+}
+
+static int tuple_space_tuple_add_type(struct tnt_stream *tuple, const struct tuple_space_ref_t *val) {
+	if (val->ref_type <= __TUPLE_SPACE_VALUE_VARIABLE_MAX || val->ref_type >= __TUPLE_SPACE_INVALID_TYPE) {
+		assert(!"Ref shouldn't contain values variables");
+	}
+
+	log_d("Ref element found");
+
+	tnt_object_add_array(tuple, 2); // first arg is elemnt type, second is element value
+	tnt_object_add_strz(tuple, "TYPE");
+	tnt_object_add_strz(tuple, tuple_space_types[val->ref_type]);
+
 	return 0;
 }
 
 /*
-static int tuple_space_tuple_add_type(struct tnt_stream *tuple, const enum tuple_space_elem_value_type_t *val) {
-	if (*val < 0 || *val >= TUPLE_SPACE_TYPE_MAX) {
-		log_e("Unknown value type found!");
-		return -1;
-	}
-
-	tnt_object_add_array(tuple, 2); // first arg is elemnt type, second is element value
-	tnt_object_add_strz(tuple, "TYPE");
-	tnt_object_add_strz(tuple, tuple_space_types[*val]);
-
-	return 0;
-}
-
 static int tuple_space_tuple_add_mask(struct tnt_stream *tuple, const enum tuple_space_elem_mask_type_t *val) {
 	if (*val < 0 || *val >= TUPLE_SPACE_MASK_MAX) {
 		log_e("Unknown value type found!");
@@ -298,7 +353,7 @@ static int tuple_space_tuple_add_mask(struct tnt_stream *tuple, const enum tuple
 }
 */
 
-static struct tnt_stream *tuple_space_tuple_mk(int n_items, const struct tuple_space_elem_t *items) {
+static struct tnt_stream *tuple_space_tuple_mk(int n_items, const struct tuple_space_elem_t *items, int read_only) {
 	struct tnt_stream *tuple = tnt_object(NULL);
 
 	tnt_object_add_array(tuple, n_items);
@@ -314,16 +369,16 @@ static struct tnt_stream *tuple_space_tuple_mk(int n_items, const struct tuple_s
 					abort = 1;
 				break;
 			case TUPLE_SPACE_REF_TYPE:
-				// TODO
-				log_t("Reftype found");
+				if (tuple_space_tuple_add_type(tuple, &elem->ref_elem) == -1)
+					abort = 1;
 				break;
 			case TUPLE_SPACE_MASK_TYPE:
 				// TODO
 				log_t("Masktype found");
 				break;
 			case TUPLE_SPACE_TUPLE_TYPE:
-				// TODO:
-				log_t("Tupletype found");
+				if (tuple_space_tuple_add_tuple(tuple, &elem->tuple_elem, read_only) == -1)
+					abort = 1;
 				break;
 			default:
 				log_e("Invalid tuple came! Abort sending");
@@ -378,16 +433,14 @@ static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args
 	return 0;
 }
 
-/*
-static int tuple_space_tuple_recv(int n_items, va_list ap, uint32_t sync) {
-	// TODO
+static int tuple_space_tuple_recv(int n_items, struct tuple_space_elem_t *items, uint32_t sync) {
+	log_d("Trying to receive data from tuple space");
 	return 0;
 }
-*/
 
 int __tuple_space_out(int n_items, const struct tuple_space_elem_t *items) {
 	log_d("Trying to send tuple with %d items into tuple space", n_items);
-	struct tnt_stream *tuple = tuple_space_tuple_mk(n_items, items);
+	struct tnt_stream *tuple = tuple_space_tuple_mk(n_items, items, 0);
 
 	int ret = -1;
 	if (tuple) {
@@ -401,13 +454,9 @@ int __tuple_space_out(int n_items, const struct tuple_space_elem_t *items) {
 	return ret;
 }
 
-/*
-int __tuple_space_in(int n_items, ...) {
-	va_list ap;
-	va_start(ap, n_items);
-
+int __tuple_space_in(int n_items, struct tuple_space_elem_t *items) {
 	log_d("Trying to get tuple with %d items from tuple space", n_items);
-	struct tnt_stream *tuple = tuple_space_tuple_mk(n_items, ap);
+	struct tnt_stream *tuple = tuple_space_tuple_mk(n_items, items, 1);
 
 	int ret = -1;
 	uint32_t sync;
@@ -416,21 +465,15 @@ int __tuple_space_in(int n_items, ...) {
 		tnt_stream_free(tuple);
 	}
 
-	va_end(ap);
 	if (ret != -1)
 		log_t("Tuple successfully sent into tuple space");
 	else
 		return -1;
 
-	// Reiterate ap => store a tuple into variables given
-	va_start(ap, n_items);
-	ret = tuple_space_tuple_recv(n_items, ap, sync);
+	ret = tuple_space_tuple_recv(n_items, items, sync);
 
 	if (ret != -1)
 		log_t("Tuple successfully returned from tuple space");
 
-	va_end(ap);
-
 	return ret;
 }
-*/

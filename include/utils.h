@@ -39,6 +39,11 @@ void clock_gettime_impl(struct timespec *ts);
 #define log_w(fmt, ...) _warn("[W] " fmt, ## __VA_ARGS__)
 #define log_i(fmt, ...) _warn("[I] " fmt, ## __VA_ARGS__)
 #define log_d(fmt, ...) _warn("[D] " fmt, ## __VA_ARGS__)
+
+#ifdef DEBUG
 #define log_t(fmt, ...) _warn("[T] " fmt, ## __VA_ARGS__)
+#else
+#define log_t(...)
+#endif
 
 #endif

@@ -8,7 +8,8 @@ AM_CFLAGS =				\
 	$(EXTRA_FLAGS)			\
 	-I$(top_srcdir)/include 	\
 	-I$(LIB_TNT_PATH)/include	\
-	-I$(LIB_TNT_PATH)/third_party
+	-I$(LIB_TNT_PATH)/third_party	\
+	-DDEBUG
 
 AM_LDFLAGS =				\
 	$(EXTRA_LD_FLAGS)		\
