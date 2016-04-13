@@ -13,7 +13,12 @@ int main() {
 
 	char test_c = 1;
 
-	tuple_space_out(test_c, a + 3, 2, str, (float)2.45, a, test(), TUPLE(sizeof(tuple) / sizeof(*tuple), tuple), TUPLE(sizeof(tuple_2) / sizeof(*tuple_2), tuple_2));
+	tuple_space_out(test_c, a + 3, 2, str, (float)2.45, a, test(),
+			TUPLE(sizeof(tuple) / sizeof(*tuple), tuple), TUPLE(sizeof(tuple_2) / sizeof(*tuple_2), tuple_2));
+	tuple_space_in(&to_store, ANY, TUPLE(5, tuple_3));
+
+	int arr[5] = { 1, 2, 3, 4, 5 };
+	tuple_space_out(2, 4, TUPLE(5, arr));
 	tuple_space_in(&to_store, ANY, TUPLE(5, tuple_3));
 
 

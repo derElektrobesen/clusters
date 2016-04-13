@@ -72,7 +72,7 @@ tuple_space = {
 				if #v > 3 then
 					cur_val = v[4] -- tuple values
 				end
-			elseif v[1] == 'TYPE' then
+			elseif v[1] == 'TYPE' or v[1] == 'MASK' then
 				-- Trying to select any value of specified type
 				cur_type = v[2]
 			else
@@ -92,26 +92,26 @@ tuple_space = {
 		local max_index = math.max(#expected_types, #found_types)
 		local equal = false
 
-		log.info("Comparing types " .. json.encode(expected_types) .. " and " .. json.encode(found_types))
-
 		for i, x in ipairs(expected_types) do
 			local y = found_types[i]
 
-			if type(x) ~= type(y) then
-				break
-			end
+			if not (type(x) == 'string' and x == 'ANY') then
+				if type(x) ~= type(y) then
+					break
+				end
 
-			if type(x) == 'table' and not tuple_space.__compare_tuple_types(x, y) then
-				break
-			elseif type(x) ~= 'table' and x ~= y then
-				break
-			end
+				if type(x) == 'table' and not tuple_space.__compare_tuple_types(x, y) then
+					break
+				elseif type(x) ~= 'table' and x ~= y then
+					break
+				end
 
-			if i == max_index then
-				-- If number of types in expected_types greater then number of types
-				-- in found_types, we have a partial equation => success compare
-				equal = (max_index == #found_types)
-				break
+				if i == max_index then
+					-- If number of types in expected_types greater then number of types
+					-- in found_types, we have a partial equation => success compare
+					equal = (max_index == #found_types)
+					break
+				end
 			end
 		end
 
@@ -119,11 +119,9 @@ tuple_space = {
 	end,
 
 	__find_type = function (types_found)
-		log.info("__find_type")
 		-- Function searchs a tuple type same with a type of given tuple
 		-- Returns an index of this type or nil if not found
 		for _, tuple in box.space.types.index.primary:pairs(nil, { iterator = box.index.ALL }) do
-			log.info(json.encode({ tuple:unpack() }))
 			-- remove first tuple element(index) and compare types
 			if tuple_space.__compare_tuple_types({ select(2, tuple:unpack()) }, types_found) then
 				return tuple[1]
@@ -151,17 +149,14 @@ tuple_space = {
 		end
 
 		log.info("Tuple came into get_tuple: " .. json.encode({...}) .. ", type_id is " .. type_id)
-			log.info(json.encode(values))
 
 		for _, t in box.space.tuples.index.primary:pairs({ typeid }, { iterator = box.index.EQ }) do
 			local tuple_ok = true
 			for i, v in ipairs(values) do
-				log.info(v)
 				if v ~= Null then
 					-- Types are already equal
 					local tuple_data = t[tuples_data_offset + i]
 					if type(v) == 'table' then
-						log.info("---> " .. json.encode(tuple_data) .. " " .. json.encode(v))
 						if #v > #tuple_data then
 							tuple_ok = false
 							break
@@ -182,8 +177,10 @@ tuple_space = {
 
 			if tuple_ok then
 				local tuple = { select(tuples_data_offset + 1, t:unpack()) }
-				log.info("Tuple found with required type: " .. json.encode({...}))
-				return tuple
+				log.info("Tuple found with required type: " .. json.encode(tuple))
+
+				-- Return a tuple with a set of tuples
+				return { tuple }
 			end
 		end
 

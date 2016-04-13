@@ -1,3 +1,6 @@
 [submodule "tarantool-client"]
 	path = tarantool-client
 	url = https://github.com/tarantool/tarantool-c.git
+[submodule "threadpool"]
+	path = threadpool
+	url = https://github.com/mbrossard/threadpool.git

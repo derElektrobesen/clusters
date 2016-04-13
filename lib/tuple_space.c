@@ -387,7 +387,6 @@ static struct tnt_stream *tuple_space_tuple_mk(int n_items, const struct tuple_s
 	int i = 0;
 	for (; !abort && i < n_items; ++i) {
 		const struct tuple_space_elem_t *elem = items + i;
-		log_t("Elem type is %d", elem->elem_type);
 		switch (elem->elem_type) {
 			case TUPLE_SPACE_VALUE_TYPE:
 				if (tuple_space_tuple_add_val(tuple, &elem->val_elem) == -1)
@@ -420,7 +419,7 @@ static struct tnt_stream *tuple_space_tuple_mk(int n_items, const struct tuple_s
 	return tuple;
 }
 
-static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args, uint32_t *sync) {
+static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args, uint64_t *sync) {
 	void request_cleanup(struct tnt_request **req) {
 		if (req && *req) {
 			tnt_request_free(*req);
@@ -458,9 +457,63 @@ static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args
 	return 0;
 }
 
-static int tuple_space_tuple_recv(int n_items, struct tuple_space_elem_t *items, uint32_t sync) {
-	log_d("Trying to receive data from tuple space");
+static int tuple_space_response_unpack(int n_items, struct tuple_space_elem_t *items, struct tnt_reply *rpl) {
+	const char *buf = rpl->buf;
+	size_t buf_size = rpl->buf_size;
+
+	if (!buf_size) {
+		log_i("Empty response came");
+		return -1;
+	}
+
+	if (mp_typeof(*buf) == MP_MAP) {
+		log_i("Tuple found in response");
+	}
+
+	if (mp_typeof(*buf) == MP_NIL) {
+		log_i("Tuple not found in tuple space");
+		return 0;
+	}
+
 	return 0;
+}
+
+/*
+static struct tnt_reply *tuple_space_wait_response(uint64_t sync) {
+	log_d("Waiting for response");
+
+	static struct tnt_reply *reply = NULL;
+	reply = tnt_reply_init(reply);
+
+	return reply;
+}
+*/
+
+static int tuple_space_tuple_recv(int n_items, struct tuple_space_elem_t *items, uint64_t sync) {
+	log_d("Trying to receive data from tuple space");
+
+	struct tnt_stream *tnt = tuple_space_configuration.tnt;
+	static struct tnt_reply *rpl = NULL;
+	if (!rpl) {
+		rpl = tnt_reply_init(NULL);
+		if (!rpl) {
+			log_e("Can't create reply object!");
+			return -1;
+		}
+	}
+
+	if (tnt->read_reply(tnt, rpl) < 0) {
+		log_e("Can't read reply from tuple space: %s",
+				tnt_error(tnt) ? tnt_strerror(tnt) : "unknown");
+		return -1;
+	}
+
+	if (rpl->sync != sync) {
+		log_e("Invalid Sync came in response, %" PRIu64 " expected, %" PRIu64 " found", rpl->sync, sync);
+		return -1;
+	}
+
+	return tuple_space_response_unpack(n_items, items, rpl);
 }
 
 int __tuple_space_out(int n_items, const struct tuple_space_elem_t *items) {
@@ -484,7 +537,7 @@ int __tuple_space_in(int n_items, struct tuple_space_elem_t *items) {
 	struct tnt_stream *tuple = tuple_space_tuple_mk(n_items, items, 1);
 
 	int ret = -1;
-	uint32_t sync;
+	uint64_t sync;
 	if (tuple) {
 		ret = tuple_space_tuple_send("tuple_space.get_tuple", tuple, &sync);
 		tnt_stream_free(tuple);
