@@ -1,557 +1,239 @@
+#include <stdarg.h>
+#include <assert.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 
 #include "tuple_space.h"
 
-#include "tarantool/tarantool.h"
-#include "tarantool/tnt_net.h"
-#include "tarantool/tnt_opt.h"
+#define TNT_COMM_T(t) tnt_comm_ ## t ## _type
+#define TNT_FORM_T(t) tnt_form_ ## t ## _type
+#define TNT_ARR_T(t)  tnt_arr_  ## t ## _type
+#define TNT_FARR_T(t) tnt_farr_ ## t ## _type
 
-#include "msgpuck/msgpuck.h"
+#define TNT_ARR_VT(t)  tnt_arr_  ## t ## _type_t
+#define TNT_FARR_VT(t) tnt_farr_ ## t ## _type_t
 
-inline static void __tuple_space_tuple_add_STR(struct tnt_stream *tuple, const char *str) {
-	log_d("Trying to add string '%s' into tuple", str);
-	tnt_object_add_strz(tuple, str);
-}
+#define TNT_COMM_V(t) tnt_comm_ ## t ## _val
+#define TNT_FORM_V(t) tnt_form_ ## t ## _val
+#define TNT_ARR_V(t)  tnt_arr_  ## t ## _val
+#define TNT_FARR_V(t) tnt_farr_ ## t ## _val
 
-inline static void __tuple_space_tuple_add_INT(struct tnt_stream *tuple, int64_t val) {
-	log_d("Trying to add integer '%" PRId64 "' into tuple", val);
-	tnt_object_add_int(tuple, val);
-}
+enum tnt_arg_type_t {
+#	define COMM(t, n, f) TNT_COMM_T(n),
+#	define FORM(t, n, f) TNT_FORM_T(n),
+#	define ARR(t, n, f) TNT_ARR_T(n),
+#	define FORM_ARR(t, n, f) TNT_FARR_T(n),
 
-inline static void __tuple_space_tuple_add_FLOAT(struct tnt_stream *tuple, float val) {
-	log_d("Trying to add float '%f' into tuple", val);
-	tnt_object_add_float(tuple, val);
-}
+	TNT_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
 
-inline static void __tuple_space_tuple_add_DOUBLE(struct tnt_stream *tuple, double val) {
-	log_d("Trying to add double '%lf' into tuple", val);
-	tnt_object_add_double(tuple, val);
-}
-
-#define __CONVERTOR(_c_type, _typename, _index)							\
-	__CONCAT_EX(__tuple_space_##_c_type##_convertor_, __TYPENAME(_typename, _index))
-
-#define HELPER(_type, _index, _typename)							\
-	inline static struct tuple_space_elem_t *__CONVERTOR(value, _typename, _index)		\
-			(struct tuple_space_elem_t *dest, void *data) __attribute__((nonnull));	\
-	inline static struct tuple_space_elem_t *__CONVERTOR(value, _typename, _index)		\
-			(struct tuple_space_elem_t *dest, void *data) {				\
-		log_t("Arg value type is '" #_type "'");					\
-		dest->elem_type = TUPLE_SPACE_VALUE_TYPE;					\
-		dest->val_elem.value_type = __VALUE_VAR(_typename, _index);			\
-		dest->val_elem.__TYPENAME(_typename, _index) = *(_type *)data;			\
-		return dest;									\
-	}											\
-	inline static struct tuple_space_elem_t *__CONVERTOR(ref, _typename, _index)		\
-			(struct tuple_space_elem_t *dest, void *data) __attribute__((nonnull));	\
-	inline static struct tuple_space_elem_t *__CONVERTOR(ref, _typename, _index)		\
-			(struct tuple_space_elem_t *dest, void *data) {				\
-		log_t("Arg type is a pointer on '" #_type "'");					\
-		dest->elem_type = TUPLE_SPACE_REF_TYPE;						\
-		dest->ref_elem.ref_type = __REF_VAR(_typename, _index);				\
-		dest->ref_elem.__TYPENAME(_typename, _index) = *(_type **)data;			\
-		return dest;									\
-	}
-
-__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-
-#undef HELPER
-
-// A pointer on variable which contains a pointer on a tuple (which is allocated on heap) should be passed in data
-inline static struct tuple_space_elem_t *__tuple_space_value_convertor_TUPLE(struct tuple_space_elem_t *dest, void *data) {
-	struct tuple_space_tuple_t *passed_tuple = *(struct tuple_space_tuple_t **)data;
-
-	memcpy(&dest->tuple_elem, passed_tuple, sizeof(dest->tuple_elem));
-	dest->elem_type = TUPLE_SPACE_TUPLE_TYPE;
-
-	log_d("Arg is a Tuple of size %zu", dest->tuple_elem.n_items);
-
-	// XXX: Passed tuple should be generated with TUPLE() macro
-	log_t("Freeing a generated Tuple...");
-	free(passed_tuple);
-
-	return dest;
-}
-
-// A pointer on variable which contains a pointer on a mask (which is allocated on heap) should be passed in data
-inline static struct tuple_space_elem_t *__tuple_space_value_convertor_MASK(struct tuple_space_elem_t *dest, void *data) {
-	struct tuple_space_mask_t *passed_mask = *(struct tuple_space_mask_t **)data;
-
-	memcpy(&dest->mask_elem, passed_mask , sizeof(dest->mask_elem));
-	dest->elem_type = TUPLE_SPACE_MASK_TYPE;
-
-	log_d("Arg is a Mask of type %d", dest->mask_elem.mask_type);
-
-	// XXX: Passed mask should be generated with ANY (or same) macro
-	log_t("Freeing a generated Mask...");
-	free(passed_mask);
-
-	return dest;
-}
-
-static struct tuple_space_elem_t *__tuple_space_invalid_type(struct tuple_space_elem_t *dest __attribute__((unused)),
-		void *data __attribute__((unused))) {
-	assert(!"Trying to send into tuple space a value of unknown type!");
-	return NULL;
-}
-
-// A pointer on array of items of type item_type should be passed in items
-struct tuple_space_tuple_t *__tuple_space_mk_user_tuple(size_t n_items, void *items,
-		enum tuple_space_variable_type_t item_type) {
-	struct tuple_space_tuple_t *tup = malloc(sizeof(struct tuple_space_tuple_t));
-	tup->item_type = item_type;
-	tup->n_items = n_items;
-
-	log_t("Tuple contains %zu items", n_items);
-
-	switch (item_type) {
-#define HELPER(_type, _index, _typename)							\
-		case __VALUE_VAR(_typename, _index):						\
-			tup->__TYPENAME(_typename, _index) = (_type *)items;			\
-			log_t("Tuple items have a type '" #_type "'");				\
-			break;									\
-		case __REF_VAR(_typename, _index):						\
-			assert("Tuple can't contain references on type '" #_type "'. "		\
-					"Only values are supported.");				\
-			break;
-
-		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-
-#undef HELPER
-		default:
-			log_e("Unsupported tuple element type: %d!", item_type);
-			assert(0);
-	}
-
-	return tup;
-}
-
-struct tuple_space_mask_t *__tuple_space_mk_user_mask(enum tuple_space_mask_type_t mask_type) {
-	struct tuple_space_mask_t *mask = malloc(sizeof(struct tuple_space_mask_t));
-
-	mask->mask_type = mask_type;
-
-	return mask;
-}
-
-__tuple_space_convertor_t __tuple_space_convertors[__TUPLE_SPACE_N_TYPES] = {
-#define HELPER(_type, _index, _typename)							\
-	[__VALUE_VAR(_typename, _index)] = __CONVERTOR(value, _typename, _index),
-
-	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-
-#undef HELPER
-#define HELPER(_type, _index, _typename)							\
-	[__REF_VAR(_typename, _index)] = __CONVERTOR(ref, _typename, _index),
-
-	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-
-#undef HELPER
-
-	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = __tuple_space_value_convertor_TUPLE,
-	[__TUPLE_SPACE_MASK_VARIABLE_ANY] = __tuple_space_value_convertor_MASK,
-	[__TUPLE_SPACE_INVALID_TYPE] = __tuple_space_invalid_type,
+#	undef COMM
+#	undef FORM
+#	undef ARR
+#	undef FORM_ARR
 };
 
-struct tuple_space_configuration_t {
-	char host[255];
-	uint16_t port;
+struct tnt_expr_t {
+#	define COMM(t, n, f) const t TNT_COMM_V(n);
+#	define FORM(t, n,f ) t *TNT_FORM_V(n);
+#	define ARR(t, n, f) struct TNT_ARR_VT(n) {						\
+		unsigned s;									\
+		const t *v;									\
+	} TNT_ARR_V(n);
+#	define FORM_ARR(t, n, f) struct TNT_FARR_VT(n) {					\
+		unsigned s;									\
+		t **v;										\
+	} TNT_FARR_V(n);
 
-	struct tnt_stream *tnt;
-	struct tnt_reply *reply;
+	enum tnt_arg_type_t type;
+	union {
+		TNT_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
+	};
+
+#	undef COMM
+#	undef FORM
+#	undef ARR
+#	undef FORM_ARR
 };
 
-static struct tuple_space_configuration_t tuple_space_configuration;
+#define DECL_RET_VAR(n) static __thread struct tnt_expr_t n
 
-__attribute__((destructor))
-static void tuple_space_destroy() {
-	struct tuple_space_configuration_t *conf = &tuple_space_configuration;
-
-	if (conf->reply)
-		tnt_reply_free(conf->reply);
-
-	if (conf->tnt) {
-		tnt_close(conf->tnt);
-		tnt_stream_free(conf->tnt);
-	}
-}
-
-static int tuple_space_ping() {
-	struct tuple_space_configuration_t *conf = &tuple_space_configuration;
-	log_i("Sending ping...");
-
-	tnt_ping(conf->tnt);
-	conf->reply = tnt_reply_init(conf->reply);
-
-	if (!conf->reply) {
-		log_e("Can't create reply for ping request: %s", tnt_strerror(conf->tnt));
-		return -1;
+#define COMM(t, n, f)										\
+	TNT_COMMON_F_NAME(t, n) {								\
+		DECL_RET_VAR(ret);								\
+		ret = (struct tnt_expr_t){							\
+			.type = TNT_COMM_T(n),							\
+			.TNT_COMM_V(n) = arg,							\
+		};										\
+		return &ret;									\
 	}
 
-	if (conf->tnt->read_reply(conf->tnt, conf->reply) == -1) {
-		log_e("Can't get reply for ping request: %s", tnt_strerror(conf->tnt));
-		return -1;
+#define FORM(t, n, f)										\
+	TNT_FORMAL_F_NAME(t, n) {								\
+		DECL_RET_VAR(ret);								\
+		ret = (struct tnt_expr_t){							\
+			.type = TNT_FORM_T(n),							\
+			.TNT_FORM_V(n) = arg,							\
+		};										\
+		return &ret;									\
 	}
 
-	log_i("Ping done");
-	return 0;
-}
-
-static int tuple_space_connect(struct timeval *conn_timeout, struct timeval *req_timeout) {
-	struct tuple_space_configuration_t *conf = &tuple_space_configuration;
-
-	int reconnecting = 0;
-	if (conf->tnt) {
-		log_i("Reconnecting...");
-		reconnecting = 1;
+#define ARR(t, n, f)										\
+	TNT_ARR_F_NAME(t, n) {									\
+		DECL_RET_VAR(ret);								\
+		ret = (struct tnt_expr_t){							\
+			.type = TNT_ARR_T(n),							\
+			.TNT_ARR_V(n) = (struct TNT_ARR_VT(n)){					\
+				.s = size,							\
+				.v = arg,							\
+			},									\
+		};										\
+		return &ret;									\
 	}
 
-	conf->tnt = tnt_net(conf->tnt);
-
-	if (!conf->tnt) {
-		log_e("Can't create stream: %s", tnt_strerror(conf->tnt));
-		return -1;
+#define FORM_ARR(t, n, f)									\
+	TNT_FORMAL_ARR_F_NAME(t, n) {								\
+		DECL_RET_VAR(ret);								\
+		ret = (struct tnt_expr_t){							\
+			.type = TNT_FARR_T(n),							\
+			.TNT_FARR_V(n) = (struct TNT_FARR_VT(n)){				\
+				.s = size,							\
+				.v = arg,							\
+			},									\
+		};										\
+		return &ret;									\
 	}
 
-	if (!reconnecting) {
-		// otherwise args will be copyed from previous version of tnt_stream
-		char uri[sizeof(conf->host) + sizeof("99999")] = "";
-		snprintf(uri, sizeof(uri), "%s:%u", conf->host, conf->port);
+TNT_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
 
-		tnt_set(conf->tnt, TNT_OPT_URI, uri);
-		tnt_set(conf->tnt, TNT_OPT_SEND_BUF, 0); // disable buffering for send
-		tnt_set(conf->tnt, TNT_OPT_RECV_BUF, 0); // disable buffering for recv
+#undef COMM
+#undef FORM
+#undef ARR
+#undef FORM_ARR
 
-		struct timeval default_conn_timeout = { .tv_sec = 1, .tv_usec = 0,  },
-			       default_req_timeout = { .tv_sec = 0, .tv_usec = 500, };
-
-		if (!conn_timeout)
-			conn_timeout = &default_conn_timeout;
-		if (!req_timeout)
-			req_timeout = &default_req_timeout;
-
-		tnt_set(conf->tnt, TNT_OPT_TMOUT_CONNECT, conn_timeout);
-		tnt_set(conf->tnt, TNT_OPT_TMOUT_SEND, req_timeout);
-	}
-
-	if (tnt_connect(conf->tnt) == -1) {
-		log_e("Can't connect to tuple space (%s:%u): %s",
-				conf->host, conf->port, tnt_strerror(conf->tnt));
-		return -1;
-	}
-
-	log_i("Connected to %s:%u", conf->host, conf->port);
-	return tuple_space_ping();
-}
-
-int tuple_space_set_configuration_ex(const char *host, uint16_t port,
-		struct timeval *conn_timeout, struct timeval *req_timeout) {
-	int printed = snprintf(tuple_space_configuration.host, sizeof(tuple_space_configuration.host), "%s", host);
-	if (printed >= sizeof(tuple_space_configuration.host)) {
-		log_e("Too long hostname given into tuple_space_set_configuration()");
-		return -1;
-	}
-
-	tuple_space_configuration.port = port;
-	return tuple_space_connect(conn_timeout, req_timeout);
-}
-
-static const char *tuple_space_types[__TUPLE_SPACE_N_TYPES] = {
-#define HELPER(_type, _index, _typename) [__VALUE_VAR(_typename, _index)] = #_typename,
-	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-#undef HELPER
-#define HELPER(_type, _index, _typename) [__REF_VAR(_typename, _index)] = #_typename,
-	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-#undef HELPER
-	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = "TUPLE",
-	[__TUPLE_SPACE_MASK_VARIABLE_ANY] = "MASK",
+struct tnt_processor_t {
+	struct tnt_expr_t **args;
+	unsigned n_args;
 };
 
 #ifdef DEBUG
-const char *tuple_space_real_types[__TUPLE_SPACE_N_TYPES] = {
-	// For debug purposes
-#define HELPER(_type, _index, _typename) [__VALUE_VAR(_typename, _index)] = #_type,
-	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-#undef HELPER
-	[__TUPLE_SPACE_VALUE_VARIABLE_MAX] = "__invalid_var__",
-#define HELPER(_type, _index, _typename) [__REF_VAR(_typename, _index)] = __STRING(_type *),
-	__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-#undef HELPER
-	[__TUPLE_SPACE_TUPLE_VARIABLE_TUPLE] = "__tuple__",
-	[__TUPLE_SPACE_MASK_VARIABLE_ANY] = "__mask_any__",
-	[__TUPLE_SPACE_INVALID_TYPE] = "__invalid__",
-};
+
+#ifndef MAX_STR_VALUE_LEN
+#	define MAX_STR_VALUE_LEN 4096
 #endif
 
-static int tuple_space_tuple_add_val(struct tnt_stream *tuple, const struct tuple_space_value_t *val) {
-	if (val->value_type < 0 || val->value_type >= __TUPLE_SPACE_VALUE_VARIABLE_MAX) {
-		log_e("Unknown value type found!");
-		return -1;
-	}
+void DUMP_EXPR(const char *prefix, const struct tnt_expr_t *expr) {
+	const char *expr_type = "unknown";
+	char expr_value[MAX_STR_VALUE_LEN];
+	bool is_formal = false;
 
-	log_t("Value element found");
-
-	tnt_object_add_array(tuple, 2); // first arg is elemnt type, second is element value
-	tnt_object_add_strz(tuple, tuple_space_types[val->value_type]);
-
-	switch (val->value_type) {
-#define HELPER(_type, _index, _typename)							\
-		case __VALUE_VAR(_typename, _index):						\
-			__tuple_space_tuple_add_##_typename(tuple, val->__TYPENAME(_typename, _index)); \
-			break;
-
-		__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-
-#undef HELPER
-		default:
-			log_e("Unknown value type found!");
-			return -1;
-	}
-	return 0;
-}
-
-static int tuple_space_tuple_add_tuple(struct tnt_stream *tuple,
-		const struct tuple_space_tuple_t *val, int read_only) {
-	if (val->item_type < 0 || val->item_type >= __TUPLE_SPACE_VALUE_VARIABLE_MAX) {
-		assert(!"Tuple shouldn't contain non-values variables");
-	}
-
-	log_d("Sending tuple of type %s", tuple_space_types[val->item_type]);
-
-	tnt_object_add_array(tuple, 3 + (read_only ? 0 : 1));
-	tnt_object_add_strz(tuple, "TUPLE");
-	tnt_object_add_strz(tuple, tuple_space_types[val->item_type]);
-	tnt_object_add_int(tuple, val->n_items);
-
-	if (!read_only) {
-		tnt_object_add_array(tuple, val->n_items);
-
-		int i = 0;
-		for (; i < val->n_items; ++i) {
-			switch (val->item_type) {
-#define HELPER(_type, _index, _typename)							\
-				case __VALUE_VAR(_typename, _index):				\
-					__tuple_space_tuple_add_##_typename(tuple, val->__TYPENAME(_typename, _index)[i]); \
-					break;
-
-				__TUPLE_SPACE_TYPES_GENERATOR(HELPER)
-
-#undef HELPER
-				default:
-					log_e("Unknown value type found!");
-					return -1;
-			}
+	switch (expr->type) {
+#define COMM(t, n, f)										\
+		case TNT_COMM_T(n): {								\
+			expr_type = STR(TNT_COMM_T(n));						\
+			snprintf(expr_value, sizeof(expr_value), f, expr->TNT_COMM_V(n));	\
+			break;									\
 		}
-	}
+#define FORM(t, n, f)										\
+		case TNT_FORM_T(n): {								\
+			expr_type = STR(TNT_FORM_T(n));						\
+			is_formal = true;							\
+			break;									\
+		}
+#define ARR(t, n, f)										\
+		case TNT_ARR_T(n): {								\
+			expr_type = STR(TNT_ARR_T(n));						\
+			int printed = snprintf(expr_value, sizeof(expr_value),			\
+					"count: %u, data: (", expr->TNT_ARR_V(n).s);		\
+			for (int i = 0; printed < sizeof(expr_value) && i < expr->TNT_ARR_V(n).s; ++i) { \
+				printed += snprintf(expr_value + printed,			\
+						sizeof(expr_value) - printed,			\
+						f "%s",						\
+						expr->TNT_ARR_V(n).v[i],			\
+						(i == expr->TNT_ARR_V(n).s - 1 ? "" : ", "));	\
+			}									\
+			if (printed < sizeof(expr_value))					\
+				snprintf(expr_value + printed, sizeof(expr_value) - printed, ")"); \
+			break;									\
+		}
+#define FORM_ARR(t, n, f)										\
+		case TNT_FARR_T(n): {								\
+			expr_type = STR(TNT_FARR_T(n));						\
+			snprintf(expr_value, sizeof(expr_value), "count: %u", expr->TNT_FARR_V(n).s); \
+			break;									\
+		}
 
-	return 0;
-}
+		TNT_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
 
-static int tuple_space_tuple_add_type(struct tnt_stream *tuple, const struct tuple_space_ref_t *val) {
-	if (val->ref_type <= __TUPLE_SPACE_VALUE_VARIABLE_MAX || val->ref_type >= __TUPLE_SPACE_INVALID_TYPE) {
-		assert(!"Ref shouldn't contain values variables");
-	}
-
-	log_d("Ref element found");
-
-	tnt_object_add_array(tuple, 2); // first arg is elemnt type, second is element value
-	tnt_object_add_strz(tuple, "TYPE");
-	tnt_object_add_strz(tuple, tuple_space_types[val->ref_type]);
-
-	return 0;
-}
-
-static int tuple_space_tuple_add_mask(struct tnt_stream *tuple, const struct tuple_space_mask_t *val) {
-	if (val->mask_type < 0 || val->mask_type >= TUPLE_SPACE_MASK_TYPE_MAX)
-		assert(!"Invalid mask type passed!");
-
-	static const char *masks_types[TUPLE_SPACE_MASK_TYPE_MAX] = {
-		[TUPLE_SPACE_MASK_TYPE_ANY] = "ANY",
+#undef COMM
+#undef FORM
+#undef ARR
+#undef FORM_ARR
 	};
 
-	log_t("Masktype found");
-
-	tnt_object_add_array(tuple, 2); // first arg is elemnt type, second is element value
-	tnt_object_add_strz(tuple, "MASK");
-	tnt_object_add_strz(tuple, masks_types[val->mask_type]);
-
-	return 0;
+	log_t("%s%s%s%s", prefix, expr_type, is_formal ? "" : " => ", is_formal ? "" : expr_value);
 }
 
-static struct tnt_stream *tuple_space_tuple_mk(int n_items, const struct tuple_space_elem_t *items, int read_only) {
-	struct tnt_stream *tuple = tnt_object(NULL);
-
-	tnt_object_add_array(tuple, n_items);
-
-	int abort = 0;
-	int i = 0;
-	for (; !abort && i < n_items; ++i) {
-		const struct tuple_space_elem_t *elem = items + i;
-		switch (elem->elem_type) {
-			case TUPLE_SPACE_VALUE_TYPE:
-				if (tuple_space_tuple_add_val(tuple, &elem->val_elem) == -1)
-					abort = 1;
-				break;
-			case TUPLE_SPACE_REF_TYPE:
-				if (tuple_space_tuple_add_type(tuple, &elem->ref_elem) == -1)
-					abort = 1;
-				break;
-			case TUPLE_SPACE_MASK_TYPE:
-				if (tuple_space_tuple_add_mask(tuple, &elem->mask_elem) == -1)
-					abort = 1;
-				break;
-			case TUPLE_SPACE_TUPLE_TYPE:
-				if (tuple_space_tuple_add_tuple(tuple, &elem->tuple_elem, read_only) == -1)
-					abort = 1;
-				break;
-			default:
-				log_e("Invalid tuple came! Abort sending");
-				abort = 1;
-				break;
-		}
+void DUMP_PRAGMA(const char *pragma_name, const struct tnt_processor_t *pragma) {
+	log_t("%s(", pragma_name);
+	for (unsigned i = 0; i < pragma->n_args; ++i) {
+		DUMP_EXPR("\t", pragma->args[i]);
 	}
-
-	if (abort) {
-		tnt_stream_free(tuple);
-		return NULL;
-	}
-
-	return tuple;
+	log_t(")");
 }
 
-static int tuple_space_tuple_send(const char *func_name, struct tnt_stream *args, uint64_t *sync) {
-	void request_cleanup(struct tnt_request **req) {
-		if (req && *req) {
-			tnt_request_free(*req);
-			*req = NULL;
-		}
-	}
+#else
+#	define DUMP_EXPR(...)
+#	define DUMP_PRAGMA(...)
+#endif // DEBUG
 
-	assert(tuple_space_configuration.tnt);
-
-	struct tnt_request *req __attribute__((cleanup(request_cleanup))) = tnt_request_call(NULL);
-
-	if (!req) {
-		log_e("Can't create call request");
-		return -1;
-	}
-
-	if (tnt_request_set_funcz(req, func_name) == -1) {
-		log_e("Can't set function name");
-		return -1;
-	}
-
-	if (tnt_request_set_tuple(req, args) == -1) {
-		log_e("Can't set arguments for call request");
-		return -1;
-	}
-
-	if (tnt_request_compile(tuple_space_configuration.tnt, req) == -1) {
-		log_e("Can't send request into stream: %s", tnt_strerror(tuple_space_configuration.tnt));
-		return -1;
-	}
-
-	if (sync)
-		*sync = req->hdr.sync;
-
-	return 0;
+__attribute__((nonnull))
+static bool tnt_process_in_pragma(struct tnt_processor_t *prc) {
+	return true;
 }
 
-static int tuple_space_response_unpack(int n_items, struct tuple_space_elem_t *items, struct tnt_reply *rpl) {
-	const char *buf = rpl->buf;
-	size_t buf_size = rpl->buf_size;
-
-	if (!buf_size) {
-		log_i("Empty response came");
-		return -1;
-	}
-
-	if (mp_typeof(*buf) == MP_MAP) {
-		log_i("Tuple found in response");
-	}
-
-	if (mp_typeof(*buf) == MP_NIL) {
-		log_i("Tuple not found in tuple space");
-		return 0;
-	}
-
-	return 0;
+__attribute__((nonnull))
+static bool tnt_process_out_pragma(struct tnt_processor_t *prc) {
+	return true;
 }
 
-/*
-static struct tnt_reply *tuple_space_wait_response(uint64_t sync) {
-	log_d("Waiting for response");
-
-	static struct tnt_reply *reply = NULL;
-	reply = tnt_reply_init(reply);
-
-	return reply;
-}
-*/
-
-static int tuple_space_tuple_recv(int n_items, struct tuple_space_elem_t *items, uint64_t sync) {
-	log_d("Trying to receive data from tuple space");
-
-	struct tnt_stream *tnt = tuple_space_configuration.tnt;
-	static struct tnt_reply *rpl = NULL;
-	if (!rpl) {
-		rpl = tnt_reply_init(NULL);
-		if (!rpl) {
-			log_e("Can't create reply object!");
-			return -1;
-		}
-	}
-
-	if (tnt->read_reply(tnt, rpl) < 0) {
-		log_e("Can't read reply from tuple space: %s",
-				tnt_error(tnt) ? tnt_strerror(tnt) : "unknown");
-		return -1;
-	}
-
-	if (rpl->sync != sync) {
-		log_e("Invalid Sync came in response, %" PRIu64 " expected, %" PRIu64 " found", rpl->sync, sync);
-		return -1;
-	}
-
-	return tuple_space_response_unpack(n_items, items, rpl);
+__attribute__((nonnull))
+static bool tnt_process_rd_pragma(struct tnt_processor_t *prc) {
+	return true;
 }
 
-int __tuple_space_out(int n_items, const struct tuple_space_elem_t *items) {
-	log_d("Trying to send tuple with %d items into tuple space", n_items);
-	struct tnt_stream *tuple = tuple_space_tuple_mk(n_items, items, 0);
-
-	int ret = -1;
-	if (tuple) {
-		ret = tuple_space_tuple_send("tuple_space.add_tuple", tuple, NULL);
-		tnt_stream_free(tuple);
-	}
-
-	if (ret != -1)
-		log_t("Tuple successfully sent into tuple space");
-
-	return ret;
+__attribute__((nonnull))
+static bool tnt_process_eval_pragma(struct tnt_processor_t *prc) {
+	return true;
 }
 
-int __tuple_space_in(int n_items, struct tuple_space_elem_t *items) {
-	log_d("Trying to get tuple with %d items from tuple space", n_items);
-	struct tnt_stream *tuple = tuple_space_tuple_mk(n_items, items, 1);
-
-	int ret = -1;
-	uint64_t sync;
-	if (tuple) {
-		ret = tuple_space_tuple_send("tuple_space.get_tuple", tuple, &sync);
-		tnt_stream_free(tuple);
+#define MK_PRAGMA_PROCESSOR(name)								\
+	__attribute__((nonnull))								\
+	bool TNT_PRAGMA_PROCESSOR(name)(unsigned n_args, ...) {					\
+		if (!n_args)									\
+			return true;								\
+												\
+		struct tnt_processor_t prc;							\
+		memset(&prc, 0, sizeof(prc));							\
+												\
+		prc.n_args = n_args;								\
+		prc.args = (struct tnt_expr_t **)calloc(n_args, sizeof(struct tnt_expr_t *));	\
+												\
+		assert(prc.n_args);								\
+												\
+		va_list ap;									\
+		va_start (ap, n_args);								\
+												\
+		for (unsigned i = 0; i < n_args; ++i) {						\
+			prc.args[i] = va_arg(ap, struct tnt_expr_t *);				\
+			assert(prc.args[i]);							\
+		}										\
+												\
+		va_end(ap);									\
+		DUMP_PRAGMA(#name, &prc);							\
+		return tnt_process_ ## name ## _pragma(&prc);					\
 	}
 
-	if (ret != -1)
-		log_t("Tuple successfully sent into tuple space");
-	else
-		return -1;
+TNT_SUPPORTED_PRAGMAS(MK_PRAGMA_PROCESSOR)
 
-	ret = tuple_space_tuple_recv(n_items, items, sync);
-
-	if (ret != -1)
-		log_t("Tuple successfully returned from tuple space");
-
-	return ret;
-}
+#undef MK_PRAGMA_PROCESSOR
