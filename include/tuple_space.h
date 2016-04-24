@@ -22,7 +22,7 @@
 #define TNT_COMMON_F_NAME(t, n)		struct tnt_expr_t *__tnt_ ## n ## _type_converter(const t arg)
 #define TNT_FORMAL_F_NAME(t, n)		struct tnt_expr_t *__tnt_ ## n ## _formal_type_converter(t *arg)
 #define TNT_ARR_F_NAME(t, n)		struct tnt_expr_t *__tnt_ ## n ## _arr_type_converter(const t *arg, unsigned size)
-#define TNT_FORMAL_ARR_F_NAME(t, n)	struct tnt_expr_t *__tnt_ ## n ## _formal_arr_type_converter(t **arg, unsigned size)
+#define TNT_FORMAL_ARR_F_NAME(t, n)	struct tnt_expr_t *__tnt_ ## n ## _formal_arr_type_converter(t *arg, unsigned size)
 
 #define TNT_PROCESS_TYPES(comm, form, arr, form_arr)	\
 	TNT_SUPPORTED_TYPES(comm)			\
@@ -33,10 +33,10 @@
 struct tnt_expr_t;
 
 // mk functions prototypes
-#define COMM(t, n, f) TNT_COMMON_F_NAME(t, n);
-#define FORM(t, n, f) TNT_FORMAL_F_NAME(t, n);
-#define ARR(t, n, f) TNT_ARR_F_NAME(t, n);
-#define FORM_ARR(t, n, f) TNT_FORMAL_ARR_F_NAME(t, n);
+#define COMM(t, n, ...) TNT_COMMON_F_NAME(t, n);
+#define FORM(t, n, ...) TNT_FORMAL_F_NAME(t, n);
+#define ARR(t, n, ...) TNT_ARR_F_NAME(t, n);
+#define FORM_ARR(t, n, ...) TNT_FORMAL_ARR_F_NAME(t, n);
 TNT_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
 #undef COMM
 #undef FORM

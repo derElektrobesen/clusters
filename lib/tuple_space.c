@@ -20,10 +20,10 @@
 #define TNT_FARR_V(t) tnt_farr_ ## t ## _val
 
 enum tnt_arg_type_t {
-#	define COMM(t, n, f) TNT_COMM_T(n),
-#	define FORM(t, n, f) TNT_FORM_T(n),
-#	define ARR(t, n, f) TNT_ARR_T(n),
-#	define FORM_ARR(t, n, f) TNT_FARR_T(n),
+#	define COMM(t, n, ...)		TNT_COMM_T(n),
+#	define FORM(t, n, ...)		TNT_FORM_T(n),
+#	define ARR(t, n, ...)		TNT_ARR_T(n),
+#	define FORM_ARR(t, n, ...)	TNT_FARR_T(n),
 
 	TNT_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
 
@@ -34,15 +34,15 @@ enum tnt_arg_type_t {
 };
 
 struct tnt_expr_t {
-#	define COMM(t, n, f) const t TNT_COMM_V(n);
-#	define FORM(t, n,f ) t *TNT_FORM_V(n);
-#	define ARR(t, n, f) struct TNT_ARR_VT(n) {						\
+#	define COMM(t, n, ...) const t TNT_COMM_V(n);
+#	define FORM(t, n, ...) t *TNT_FORM_V(n);
+#	define ARR(t, n, ...) struct TNT_ARR_VT(n) {						\
 		unsigned s;									\
 		const t *v;									\
 	} TNT_ARR_V(n);
-#	define FORM_ARR(t, n, f) struct TNT_FARR_VT(n) {					\
+#	define FORM_ARR(t, n, ...) struct TNT_FARR_VT(n) {					\
 		unsigned s;									\
-		t **v;										\
+		t *v;										\
 	} TNT_FARR_V(n);
 
 	enum tnt_arg_type_t type;
@@ -56,52 +56,53 @@ struct tnt_expr_t {
 #	undef FORM_ARR
 };
 
-#define DECL_RET_VAR(n) static __thread struct tnt_expr_t n
+#define DECL_RET_VAR(n)										\
+	struct tnt_expr_t *n = (struct tnt_expr_t *)calloc(1, sizeof(struct tnt_expr_t));
 
-#define COMM(t, n, f)										\
+#define COMM(t, n, ...)										\
 	TNT_COMMON_F_NAME(t, n) {								\
 		DECL_RET_VAR(ret);								\
-		ret = (struct tnt_expr_t){							\
+		*ret = (struct tnt_expr_t){							\
 			.type = TNT_COMM_T(n),							\
 			.TNT_COMM_V(n) = arg,							\
 		};										\
-		return &ret;									\
+		return ret;									\
 	}
 
-#define FORM(t, n, f)										\
+#define FORM(t, n, ...)										\
 	TNT_FORMAL_F_NAME(t, n) {								\
 		DECL_RET_VAR(ret);								\
-		ret = (struct tnt_expr_t){							\
+		*ret = (struct tnt_expr_t){							\
 			.type = TNT_FORM_T(n),							\
 			.TNT_FORM_V(n) = arg,							\
 		};										\
-		return &ret;									\
+		return ret;									\
 	}
 
-#define ARR(t, n, f)										\
+#define ARR(t, n, ...)										\
 	TNT_ARR_F_NAME(t, n) {									\
 		DECL_RET_VAR(ret);								\
-		ret = (struct tnt_expr_t){							\
+		*ret = (struct tnt_expr_t){							\
 			.type = TNT_ARR_T(n),							\
 			.TNT_ARR_V(n) = (struct TNT_ARR_VT(n)){					\
 				.s = size,							\
 				.v = arg,							\
 			},									\
 		};										\
-		return &ret;									\
+		return ret;									\
 	}
 
-#define FORM_ARR(t, n, f)									\
+#define FORM_ARR(t, n, ...)									\
 	TNT_FORMAL_ARR_F_NAME(t, n) {								\
 		DECL_RET_VAR(ret);								\
-		ret = (struct tnt_expr_t){							\
+		*ret = (struct tnt_expr_t){							\
 			.type = TNT_FARR_T(n),							\
 			.TNT_FARR_V(n) = (struct TNT_FARR_VT(n)){				\
 				.s = size,							\
 				.v = arg,							\
 			},									\
 		};										\
-		return &ret;									\
+		return ret;									\
 	}
 
 TNT_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
@@ -122,30 +123,45 @@ struct tnt_processor_t {
 #	define MAX_STR_VALUE_LEN 4096
 #endif
 
-void DUMP_EXPR(const char *prefix, const struct tnt_expr_t *expr) {
+__attribute__((nonnull))
+static void tnt_pragma_cleanup(struct tnt_processor_t *prc) {
+	for (int i = 0; i < prc->n_args; ++i) {
+		free(prc->args[i]);
+	}
+	free(prc->args);
+
+	memset(prc, 0, sizeof(*prc));
+}
+
+__attribute__((nonnull))
+static void DUMP_EXPR(const char *prefix, const struct tnt_expr_t *expr) {
 	const char *expr_type = "unknown";
 	char expr_value[MAX_STR_VALUE_LEN];
 	bool is_formal = false;
 
 	switch (expr->type) {
-#define COMM(t, n, f)										\
+#define COMM(t, n, f, ...)									\
 		case TNT_COMM_T(n): {								\
 			expr_type = STR(TNT_COMM_T(n));						\
 			snprintf(expr_value, sizeof(expr_value), f, expr->TNT_COMM_V(n));	\
 			break;									\
 		}
-#define FORM(t, n, f)										\
+#define FORM(t, n, f, ...)									\
 		case TNT_FORM_T(n): {								\
 			expr_type = STR(TNT_FORM_T(n));						\
 			is_formal = true;							\
 			break;									\
 		}
-#define ARR(t, n, f)										\
+#define ARR(t, n, f, ...)									\
 		case TNT_ARR_T(n): {								\
 			expr_type = STR(TNT_ARR_T(n));						\
 			int printed = snprintf(expr_value, sizeof(expr_value),			\
 					"count: %u, data: (", expr->TNT_ARR_V(n).s);		\
-			for (int i = 0; printed < sizeof(expr_value) && i < expr->TNT_ARR_V(n).s; ++i) { \
+			for (int i = 0;	printed < sizeof(expr_value)				\
+					&& i < expr->TNT_ARR_V(n).s				\
+					&& (expr->type != TNT_ARR_T(char)			\
+						|| expr->TNT_ARR_V(n).v[i])			\
+					; ++i) {						\
 				printed += snprintf(expr_value + printed,			\
 						sizeof(expr_value) - printed,			\
 						f "%s",						\
@@ -156,7 +172,7 @@ void DUMP_EXPR(const char *prefix, const struct tnt_expr_t *expr) {
 				snprintf(expr_value + printed, sizeof(expr_value) - printed, ")"); \
 			break;									\
 		}
-#define FORM_ARR(t, n, f)										\
+#define FORM_ARR(t, n, f, ...)									\
 		case TNT_FARR_T(n): {								\
 			expr_type = STR(TNT_FARR_T(n));						\
 			snprintf(expr_value, sizeof(expr_value), "count: %u", expr->TNT_FARR_V(n).s); \
@@ -174,7 +190,8 @@ void DUMP_EXPR(const char *prefix, const struct tnt_expr_t *expr) {
 	log_t("%s%s%s%s", prefix, expr_type, is_formal ? "" : " => ", is_formal ? "" : expr_value);
 }
 
-void DUMP_PRAGMA(const char *pragma_name, const struct tnt_processor_t *pragma) {
+__attribute__((nonnull))
+static void DUMP_PRAGMA(const char *pragma_name, const struct tnt_processor_t *pragma) {
 	log_t("%s(", pragma_name);
 	for (unsigned i = 0; i < pragma->n_args; ++i) {
 		DUMP_EXPR("\t", pragma->args[i]);
@@ -231,7 +248,10 @@ static bool tnt_process_eval_pragma(struct tnt_processor_t *prc) {
 												\
 		va_end(ap);									\
 		DUMP_PRAGMA(#name, &prc);							\
-		return tnt_process_ ## name ## _pragma(&prc);					\
+												\
+		bool ret = tnt_process_ ## name ## _pragma(&prc);				\
+		tnt_pragma_cleanup(&prc);							\
+		return ret;									\
 	}
 
 TNT_SUPPORTED_PRAGMAS(MK_PRAGMA_PROCESSOR)
