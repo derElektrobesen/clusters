@@ -16,7 +16,7 @@ AM_CFLAGS =				\
 	-I$(top_srcdir)/include 	\
 	-I$(LIB_TNT_PATH)/include	\
 	-I$(LIB_TNT_PATH)/third_party	\
-	-I$(LIB_THREAD_POOL_PATH)	\
+	-I$(LIB_THREAD_POOL_PATH)/src	\
 	-DDEBUG
 
 AM_LDFLAGS =				\

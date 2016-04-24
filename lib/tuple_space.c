@@ -12,6 +12,8 @@
 
 #include "msgpuck/msgpuck.h"
 
+#include "threadpool.h"
+
 #define TUPLE_SPACE_COMM_T(t) tuple_space_comm_ ## t ## _type
 #define TUPLE_SPACE_FORM_T(t) tuple_space_form_ ## t ## _type
 #define TUPLE_SPACE_ARR_T(t)  tuple_space_arr_  ## t ## _type
@@ -254,27 +256,27 @@ static bool tuple_space_process_eval_pragma(struct tuple_space_processor_t *prc)
 
 __attribute__((nonnull))
 static void tuple_space_tuple_add_char(struct tnt_stream *e, char c) {
-
+	tnt_object_add_int(e, c);
 }
 
 __attribute__((nonnull))
 static void tuple_space_tuple_add_int(struct tnt_stream *e, int v) {
-
+	tnt_object_add_int(e, v);
 }
 
 __attribute__((nonnull))
-static void tuple_space_tuple_add_double(struct tnt_stream *e, double v) {
-
+inline static void tuple_space_tuple_add_double(struct tnt_stream *e, double v) {
+	tnt_object_add_double(e, v);
 }
 
 __attribute__((nonnull))
-static void tuple_space_tuple_add_char_ptrz(struct tnt_stream *e, const char *ptr, unsigned size) {
-
+inline static void tuple_space_tuple_add_char_ptrnz(struct tnt_stream *e, const char *ptr, unsigned size) {
+	tnt_object_add_str(e, ptr, size);
 }
 
 __attribute__((nonnull))
-static void tuple_space_tuple_add_char_ptr(struct tnt_stream *e, const char *ptr) {
-	return tuple_space_tuple_add_char_ptrz(e, ptr, strlen(ptr));
+inline static void tuple_space_tuple_add_char_ptr(struct tnt_stream *e, const char *ptr) {
+	return tuple_space_tuple_add_char_ptrnz(e, ptr, strlen(ptr));
 }
 
 __attribute__((nonnull))
@@ -331,7 +333,7 @@ static void tuple_space_mk_stream(struct tuple_space_processor_t *prc) {
 			if (e->TUPLE_SPACE_ARR_V(char).v[e->TUPLE_SPACE_ARR_V(char).s - 1] == '\0')
 				n = 1;
 
-			tuple_space_tuple_add_char_ptrz(tuple, e->TUPLE_SPACE_ARR_V(char).v, e->TUPLE_SPACE_ARR_V(char).s - n);
+			tuple_space_tuple_add_char_ptrnz(tuple, e->TUPLE_SPACE_ARR_V(char).v, e->TUPLE_SPACE_ARR_V(char).s - n);
 			continue;
 		}
 
@@ -390,9 +392,12 @@ static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_typ
 
 #define MK_PRAGMA_PROCESSOR(name)								\
 	__attribute__((nonnull))								\
-	bool TUPLE_SPACE_PRAGMA_PROCESSOR(name)(unsigned n_args, ...) {				\
+	void TUPLE_SPACE_PRAGMA_PROCESSOR(name)(int *ret, unsigned n_args, ...) {		\
+		assert(ret);									\
+		*ret = 1;									\
+												\
 		if (!n_args)									\
-			return true;								\
+			return;									\
 												\
 		struct tuple_space_processor_t prc;						\
 		memset(&prc, 0, sizeof(prc));							\
@@ -411,7 +416,7 @@ static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_typ
 		}										\
 												\
 		va_end(ap);									\
-		return tuple_space_process_pragma(PRAGMA_TYPE(name), &prc);			\
+		*ret = tuple_space_process_pragma(PRAGMA_TYPE(name), &prc);			\
 	}
 
 TUPLE_SPACE_SUPPORTED_PRAGMAS(MK_PRAGMA_PROCESSOR)

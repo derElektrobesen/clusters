@@ -44,16 +44,24 @@ TUPLE_SPACE_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
 #undef FORM_ARR
 
 #define DECL_PRAGMA_PROCESSOR(n) \
-	bool TUPLE_SPACE_PRAGMA_PROCESSOR(n)(unsigned n_args, ...);
+	void TUPLE_SPACE_PRAGMA_PROCESSOR(n)(int *ret, unsigned n_args, ...);
 TUPLE_SPACE_SUPPORTED_PRAGMAS(DECL_PRAGMA_PROCESSOR)
 #undef DECL_PRAGMA_PROCESSOR
 
 #define STR(...) STR_I(__VA_ARGS__)
 #define STR_I(...) #__VA_ARGS__
-#define in(...) _Pragma(STR(tnt in __VA_ARGS__;))
-#define out(...) _Pragma(STR(tnt out __VA_ARGS__;))
-#define rd(...) _Pragma(STR(tnt rd __VA_ARGS__;))
-#define eval(...) _Pragma(STR(tnt eval __VA_ARGS__;))
+
+#define COMBINE2(A, B) A ## B
+#define COMBINE(A, B) COMBINE2(A, B)
+#define __prgm(t, ...) ({						\
+	int COMBINE(ret_, __LINE__) = false;				\
+	_Pragma(STR(tnt t COMBINE(ret_, __LINE__), __VA_ARGS__;))	\
+	COMBINE(ret_, __LINE__);					\
+})
+#define in(...) __prgm(in, __VA_ARGS__)
+#define out(...) __prgm(out, __VA_ARGS__)
+#define rd(...) __prgm(rd, __VA_ARGS__)
+#define eval(...) __prgm(eval, __VA_ARGS__)
 
 #define tuple_space_set_configuration(host, port) \
 	tuple_space_set_configuration_ex(host, port, NULL, NULL)
