@@ -4,6 +4,7 @@ AM_INIT_AUTOMAKE
 m4_include(m4/configure.ac.axcheckcompileflags)
 
 AC_PROG_CC
+AC_PROG_CXX
 AC_PROG_RANLIB
 
 AC_CHECK_LIB([pthread], [pthread_create], [], [ AC_MSG_ERROR([ pthread library is required ]) ])

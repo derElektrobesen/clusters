@@ -4,19 +4,33 @@ abs_srcdir = @abs_srcdir@
 LIB_TNT_PATH = $(top_srcdir)/tarantool-client
 LIB_TNT = $(LIB_TNT_PATH)/tnt/libtarantool.a
 
+LIB_THREAD_POOL_PATH = $(top_srcdir)/threadpool
+LIB_THREAD_POOL = $(LIB_THREAD_POOL_PATH)/libthreadpool.a
+
+if DEBUG
+	EXTRA_FLAGS := "$(EXTRA_FLAGS) -DDEBUG -O0 -ggdb3"
+endif
+
 AM_CFLAGS =				\
 	$(EXTRA_FLAGS)			\
 	-I$(top_srcdir)/include 	\
 	-I$(LIB_TNT_PATH)/include	\
 	-I$(LIB_TNT_PATH)/third_party	\
+	-I$(LIB_THREAD_POOL_PATH)	\
 	-DDEBUG
 
 AM_LDFLAGS =				\
 	$(EXTRA_LD_FLAGS)		\
-	$(LIB_TNT_PATH)/tnt/libtarantool.a
+	$(LIB_TNT)			\
+	$(LIB_THREAD_POOL)
 
-
-all-local: $(LIB_TNT)
+all-local: $(LIB_TNT) $(LIB_THREAD_POOL)
+clean-local:
+	$(MAKE) -C $(LIB_TNT_PATH) clean
+	$(MAKE) -C $(LIB_THREAD_POOL_PATH) clean
 
 $(LIB_TNT):
-	cd $(LIB_TNT_PATH) && cmake -DCMAKE_C_COMPILER=$(CC) -DCMAKE_CXX_COMPILER=$(CXX) . && make -j 10
+	cd $(LIB_TNT_PATH) && cmake -DCMAKE_C_COMPILER=$(CC) -DCMAKE_CXX_COMPILER=$(CXX) . && $(MAKE) -j 10
+
+$(LIB_THREAD_POOL):
+	$(MAKE) -C $(LIB_THREAD_POOL_PATH) CC=$(CC) CXX=$(CXX)

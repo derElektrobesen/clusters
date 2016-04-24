@@ -16,8 +16,8 @@ int main() {
 
 	//int arr[5] = { 1, 2, 3, 4, 5 };
 
-	out(1, 2, 3, "test");
-	in(a, ?to_store, test(), tuple, tuple_2, ?tuple_3, str);
+	out(1, 2, 3, "test", str);
+	in(a, ?to_store, test(), tuple, tuple_2, ?tuple_3, ?tuple_2, str);
 
 
 	return 0;
