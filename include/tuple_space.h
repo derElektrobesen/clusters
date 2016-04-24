@@ -21,7 +21,7 @@
 
 #define TNT_COMMON_F_NAME(t, n)		struct tnt_expr_t *__tnt_ ## n ## _type_converter(const t arg)
 #define TNT_FORMAL_F_NAME(t, n)		struct tnt_expr_t *__tnt_ ## n ## _formal_type_converter(t *arg)
-#define TNT_ARR_F_NAME(t, n)		struct tnt_expr_t *__tnt_ ## n ## _arr_type_converter(const t *arg, unsigned size)
+#define TNT_ARR_F_NAME(t, n)		struct tnt_expr_t *__tnt_ ## n ## _arr_type_converter(t const* arg, unsigned size)
 #define TNT_FORMAL_ARR_F_NAME(t, n)	struct tnt_expr_t *__tnt_ ## n ## _formal_arr_type_converter(t *arg, unsigned size)
 
 #define TNT_PROCESS_TYPES(comm, form, arr, form_arr)	\

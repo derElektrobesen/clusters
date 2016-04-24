@@ -38,7 +38,7 @@ struct tnt_expr_t {
 #	define FORM(t, n, ...) t *TNT_FORM_V(n);
 #	define ARR(t, n, ...) struct TNT_ARR_VT(n) {						\
 		unsigned s;									\
-		const t *v;									\
+		t const* v;									\
 	} TNT_ARR_V(n);
 #	define FORM_ARR(t, n, ...) struct TNT_FARR_VT(n) {					\
 		unsigned s;									\
