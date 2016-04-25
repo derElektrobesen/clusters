@@ -17,6 +17,8 @@ AM_CFLAGS =				\
 	-I$(LIB_TNT_PATH)/include	\
 	-I$(LIB_TNT_PATH)/third_party	\
 	-I$(LIB_THREAD_POOL_PATH)/src	\
+	-DN_THREADS=64			\
+	-DQUEUE_SIZE=65536		\
 	-DDEBUG
 
 AM_LDFLAGS =				\

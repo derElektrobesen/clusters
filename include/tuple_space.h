@@ -14,7 +14,6 @@
 	_(in)						\
 	_(out)						\
 	_(rd)						\
-	_(eval)						\
 
 #define TUPLE_SPACE_PRAGMA_PROCESSOR(pragma)			\
 	__tuple_space_process_ ## pragma ## _pragma
@@ -43,6 +42,9 @@ TUPLE_SPACE_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
 #undef ARR
 #undef FORM_ARR
 
+typedef int (*tuple_space_cb_t)(void *arg);
+int TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, void *arg);
+
 #define DECL_PRAGMA_PROCESSOR(n) \
 	void TUPLE_SPACE_PRAGMA_PROCESSOR(n)(int *ret, unsigned n_args, ...);
 TUPLE_SPACE_SUPPORTED_PRAGMAS(DECL_PRAGMA_PROCESSOR)
@@ -61,7 +63,7 @@ TUPLE_SPACE_SUPPORTED_PRAGMAS(DECL_PRAGMA_PROCESSOR)
 #define in(...) __prgm(in, __VA_ARGS__)
 #define out(...) __prgm(out, __VA_ARGS__)
 #define rd(...) __prgm(rd, __VA_ARGS__)
-#define eval(...) __prgm(eval, __VA_ARGS__)
+#define eval(name, cb, arg) TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(name, cb, arg)
 
 #define tuple_space_set_configuration(host, port) \
 	tuple_space_set_configuration_ex(host, port, NULL, NULL)
