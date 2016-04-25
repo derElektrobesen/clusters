@@ -165,6 +165,10 @@ struct thread_data_t {
 	struct single_thread_configuration_t *conf;
 };
 
+static void destroy_thread_data(struct thread_data_t *thd) {
+	free(thd);
+}
+
 #ifdef DEBUG
 
 #ifndef MAX_STR_VALUE_LEN
@@ -476,43 +480,40 @@ static void tuple_space_destroy_cur_thread_data(struct single_thread_configurati
 	pthread_setspecific(tuple_space_configuration.threads_key, NULL);
 }
 
-static int tuple_space_ping() {
-#if 0
+static int tuple_space_ping(struct single_thread_configuration_t *thread_conf) {
 	struct tuple_space_configuration_t *conf = &tuple_space_configuration;
-	log_i("Sending ping...");
+	log_i("Sending ping to %s:%d...", conf->host, conf->port);
 
-	tnt_ping(conf->tnt);
-	conf->reply = tnt_reply_init(conf->reply);
+	tnt_ping(thread_conf->tnt);
+	thread_conf->reply = tnt_reply_init(thread_conf->reply);
 
-	if (!conf->reply) {
-		log_e("Can't create reply for ping request: %s", tnt_strerror(conf->tnt));
+	if (!thread_conf->reply) {
+		log_e("Can't create reply for ping request: %s", tnt_strerror(thread_conf->tnt));
 		return -1;
 	}
 
-	if (conf->tnt->read_reply(conf->tnt, conf->reply) == -1) {
-		log_e("Can't get reply for ping request: %s", tnt_strerror(conf->tnt));
+	if (thread_conf->tnt->read_reply(thread_conf->tnt, thread_conf->reply) == -1) {
+		log_e("Can't get reply for ping request: %s", tnt_strerror(thread_conf->tnt));
 		return -1;
 	}
 
 	log_i("Ping done");
-#endif
 	return 0;
 }
 
-static int tuple_space_connect() {
-#if 0
+static int tuple_space_connect(struct single_thread_configuration_t *thread_conf) {
 	struct tuple_space_configuration_t *conf = &tuple_space_configuration;
 
-	int reconnecting = 0;
-	if (conf->tnt) {
+	bool reconnecting = false;
+	if (thread_conf->tnt) {
 		log_i("Reconnecting...");
-		reconnecting = 1;
+		reconnecting = true;
 	}
 
-	conf->tnt = tnt_net(conf->tnt);
+	thread_conf->tnt = tnt_net(thread_conf->tnt);
 
-	if (!conf->tnt) {
-		log_e("Can't create stream: %s", tnt_strerror(conf->tnt));
+	if (!thread_conf->tnt) {
+		log_e("Can't create stream: %s", tnt_strerror(thread_conf->tnt));
 		return -1;
 	}
 
@@ -521,31 +522,32 @@ static int tuple_space_connect() {
 		char uri[sizeof(conf->host) + sizeof("99999")] = "";
 		snprintf(uri, sizeof(uri), "%s:%u", conf->host, conf->port);
 
-		tnt_set(conf->tnt, TNT_OPT_URI, uri);
-		tnt_set(conf->tnt, TNT_OPT_SEND_BUF, 0); // disable buffering for send
-		tnt_set(conf->tnt, TNT_OPT_RECV_BUF, 0); // disable buffering for recv
+		tnt_set(thread_conf->tnt, TNT_OPT_URI, uri);
+		tnt_set(thread_conf->tnt, TNT_OPT_SEND_BUF, 0); // disable buffering for send
+		tnt_set(thread_conf->tnt, TNT_OPT_RECV_BUF, 0); // disable buffering for recv
 
 		struct timeval default_conn_timeout = { .tv_sec = 1, .tv_usec = 0,  },
 			       default_req_timeout = { .tv_sec = 0, .tv_usec = 500, };
 
-		if (!tuple_space_configuration.conn_timeout)
+		struct timeval *conn_timeout = conf->conn_timeout;
+		struct timeval *req_timeout = conf->req_timeout;
+		if (!conn_timeout)
 			conn_timeout = &default_conn_timeout;
-		if (!tuple_space_configuration.req_timeout)
+		if (!req_timeout)
 			req_timeout = &default_req_timeout;
 
-		tnt_set(conf->tnt, TNT_OPT_TMOUT_CONNECT, conn_timeout);
-		tnt_set(conf->tnt, TNT_OPT_TMOUT_SEND, req_timeout);
+		tnt_set(thread_conf->tnt, TNT_OPT_TMOUT_CONNECT, conn_timeout);
+		tnt_set(thread_conf->tnt, TNT_OPT_TMOUT_SEND, req_timeout);
 	}
 
-	if (tnt_connect(conf->tnt) == -1) {
+	if (tnt_connect(thread_conf->tnt) == -1) {
 		log_e("Can't connect to tuple space (%s:%u): %s",
-				conf->host, conf->port, tnt_strerror(conf->tnt));
+				conf->host, conf->port, tnt_strerror(thread_conf->tnt));
 		return -1;
 	}
 
 	log_i("Connected to %s:%u", conf->host, conf->port);
-#endif
-	return tuple_space_ping();
+	return tuple_space_ping(thread_conf);
 }
 
 static struct single_thread_configuration_t *mk_thread_data() {
@@ -557,11 +559,11 @@ static struct single_thread_configuration_t *mk_thread_data() {
 	return th;
 }
 
-static void init_thread() {
+static struct single_thread_configuration_t *init_thread() {
 	struct single_thread_configuration_t *conf = pthread_getspecific(tuple_space_configuration.threads_key);
 	if (!conf) {
 		conf = mk_thread_data();
-		tuple_space_connect(); // XXX: pass thread conf here
+		tuple_space_connect(conf); // XXX: pass thread conf here
 	}
 
 	return conf;
@@ -625,11 +627,11 @@ static bool check_eval_task(struct thread_data_t *thread_data) {
 	return true;
 }
 
-static void on_thread_create(struct thrad_data_t *thread_data) {
+static void on_thread_create(struct thread_data_t *thread_data) {
 	struct single_thread_configuration_t *conf = init_thread();
 	assert(conf);
 
-	thrad_data->conf = conf;
+	thread_data->conf = conf;
 
 	bool task_found = check_eval_task(thread_data);
 	if (task_found) {
@@ -637,10 +639,10 @@ static void on_thread_create(struct thrad_data_t *thread_data) {
 		postprocess_thread(thread_data);
 	}
 
-	free(thread_data);
+	destroy_thread_data(thread_data);
 }
 
-void TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, void *arg) {
+int TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, void *arg) {
 	assert(name);
 
 	struct thread_data_t *thread_data = (struct thread_data_t *)calloc(1, sizeof(struct thread_data_t));
@@ -652,6 +654,8 @@ void TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, v
 	snprintf(thread_data->name, sizeof(thread_data->name), "%s", name);
 
 	preprocess_thread(thread_data);
-	threadpool_add(tuple_space_configuration.thread_pool, (void (*)(void *))on_thread_create, thread_data);
+	threadpool_add(tuple_space_configuration.thread_pool, (void (*)(void *))on_thread_create, thread_data, 0);
+
+	return 0;
 }
 
