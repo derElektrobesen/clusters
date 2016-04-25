@@ -133,18 +133,6 @@ TUPLE_SPACE_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
 #undef ARR
 #undef FORM_ARR
 
-struct tuple_space_processor_t {
-	struct tuple_space_expr_t **args;
-	unsigned n_args;
-
-	struct tnt_stream *stream;
-};
-
-struct single_thread_configuration_t {
-	struct tnt_stream *tnt;
-	struct tnt_reply *reply;
-};
-
 struct tuple_space_configuration_t {
 	char host[255];
 	uint16_t port;
@@ -154,6 +142,25 @@ struct tuple_space_configuration_t {
 
 	threadpool_t *thread_pool;
 	pthread_key_t threads_key; // key, shared by all threads. Used to get thread-specific data from storage
+};
+
+static struct tuple_space_configuration_t tuple_space_configuration;
+
+struct thread_data_t;
+
+struct tuple_space_processor_t {
+	struct tuple_space_expr_t **args;
+	unsigned n_args;
+
+	struct tnt_stream *stream;
+	struct thread_data_t *this_task;
+};
+
+struct single_thread_configuration_t {
+	struct tnt_stream *tnt;
+	struct tnt_reply *reply;
+
+	struct thread_data_t *current_eval; // XXX: Don't destroy this object
 };
 
 struct thread_data_t {
@@ -166,6 +173,7 @@ struct thread_data_t {
 };
 
 static void destroy_thread_data(struct thread_data_t *thd) {
+	thd->conf->current_eval = NULL; // current thread ahven't got a task
 	free(thd);
 }
 
@@ -264,7 +272,7 @@ static void tuple_space_pragma_cleanup(struct tuple_space_processor_t *prc) {
 
 	tnt_stream_free(prc->stream);
 
-	memset(prc, 0, sizeof(*prc));
+	memset(prc, 0, sizeof(*prc)); // don't free prc: allocated on stack
 }
 
 __attribute__((nonnull))
@@ -391,6 +399,26 @@ static void tuple_space_mk_stream(struct tuple_space_processor_t *prc) {
 	}
 }
 
+static struct single_thread_configuration_t *mk_thread_data() {
+	struct single_thread_configuration_t *th =
+		(struct single_thread_configuration_t *)calloc(1, sizeof(struct single_thread_configuration_t));
+	assert(th);
+
+	pthread_setspecific(tuple_space_configuration.threads_key, th);
+	return th;
+}
+
+static int tuple_space_connect(struct single_thread_configuration_t *thread_conf);
+static struct single_thread_configuration_t *get_thread_conf() {
+	struct single_thread_configuration_t *conf = pthread_getspecific(tuple_space_configuration.threads_key);
+	if (!conf) {
+		conf = mk_thread_data();
+		tuple_space_connect(conf); // XXX: pass thread conf here
+	}
+
+	return conf;
+}
+
 __attribute__((nonnull))
 static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_type, struct tuple_space_processor_t *prc) {
 	assert(pragma_type < tuple_space_max_pragma_type);
@@ -399,6 +427,11 @@ static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_typ
 
 	prc->stream = tnt_object(NULL);
 	tuple_space_mk_stream(prc);
+
+	struct single_thread_configuration_t *conf = get_thread_conf();
+	assert(conf && conf->current_eval && conf->current_eval->conf);
+
+	prc->this_task = conf->current_eval;
 
 	bool ret = false;
 	switch (pragma_type) {
@@ -450,8 +483,6 @@ static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_typ
 TUPLE_SPACE_SUPPORTED_PRAGMAS(MK_PRAGMA_PROCESSOR)
 
 #undef MK_PRAGMA_PROCESSOR
-
-static struct tuple_space_configuration_t tuple_space_configuration;
 
 __attribute__((destructor))
 static void tuple_space_destroy() {
@@ -550,23 +581,57 @@ static int tuple_space_connect(struct single_thread_configuration_t *thread_conf
 	return tuple_space_ping(thread_conf);
 }
 
-static struct single_thread_configuration_t *mk_thread_data() {
-	struct single_thread_configuration_t *th =
-		(struct single_thread_configuration_t *)calloc(1, sizeof(struct single_thread_configuration_t));
-	assert(th);
+__attribute__((nonnull))
+static void set_thread_cross_pointers(struct thread_data_t *thread_data, struct single_thread_configuration_t *conf) {
+	assert(!conf->current_eval);
 
-	pthread_setspecific(tuple_space_configuration.threads_key, th);
-	return th;
+	thread_data->conf = conf;
+	conf->current_eval = thread_data;
 }
 
-static struct single_thread_configuration_t *init_thread() {
-	struct single_thread_configuration_t *conf = pthread_getspecific(tuple_space_configuration.threads_key);
-	if (!conf) {
-		conf = mk_thread_data();
-		tuple_space_connect(conf); // XXX: pass thread conf here
+static void preprocess_thread(struct thread_data_t *thread_data) {
+	// TODO:
+	//	* mark all eval statements
+	//	* push all callbacks into vector at startup
+	//		* generate list of evals in compile time
+	//	* push tuple with current eval identificator into tuple space
+	//		and share task over all processes
+}
+
+static void postprocess_thread(struct thread_data_t *thread_data) {
+	// TODO:
+	//	push retcode into tuple space. XXX: don't forget about arg
+	//	If retcode is 0, push 0 and wait for pending tasks.
+	//	Otherwise, stop all other tasks of this type.
+}
+
+static bool check_eval_task(struct thread_data_t *thread_data) {
+	// TODO:
+	//	* check current task is exists in tuple space
+	//	* if not, finish current thread.
+	//	* start processing otherwise
+	//
+	// TODO:
+	//	* create a process which polling a tuple space to find new tasks to
+	//		execute.
+	//	* If the task is found, evaluate it.
+	return true;
+}
+
+static void on_thread_create(struct thread_data_t *thread_data) {
+	struct single_thread_configuration_t *conf = get_thread_conf();
+	assert(conf);
+
+	log_t("Evaluation with name %s was started", thread_data->name);
+	set_thread_cross_pointers(thread_data, conf);
+
+	bool task_found = check_eval_task(thread_data);
+	if (task_found) {
+		thread_data->ret = thread_data->cb(thread_data->arg);
+		postprocess_thread(thread_data);
 	}
 
-	return conf;
+	destroy_thread_data(thread_data);
 }
 
 int tuple_space_set_configuration_ex(const char *host, uint16_t port,
@@ -590,60 +655,24 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 	}
 
 	tuple_space_configuration.port = port;
-
 	tuple_space_configuration.thread_pool = threadpool_create(N_THREADS, QUEUE_SIZE, 0);
 
-	init_thread();
+	struct thread_data_t *thread_data = (struct thread_data_t *)calloc(1, sizeof(struct thread_data_t));
+	assert(thread_data);
+
+	snprintf(thread_data->name, sizeof(thread_data->name), "__main_thread__");
+	preprocess_thread(thread_data);
+
+	struct single_thread_configuration_t *conf = get_thread_conf(); // init main thread
+	set_thread_cross_pointers(thread_data, conf);
 
 	return 0;
 }
 
-static void preprocess_thread(struct thread_data_t *thread_data) {
-	// TODO:
-	//	* mark all eval statements
-	//	* push all callbacks into vector at startup
-	//		* generate list of evals in compile time
-	//	* push tuple with current eval identificator into tuple space
-	//		and share task over all processes
-}
-
-static void postprocess_thread(struct thread_data_t *thread_data) {
-	// TODO:
-	//	push retcode into tuple space.
-	//	If retcode is 0, push 0 and wait for pending tasks.
-	//	Otherwise, stop all other tasks of this type.
-}
-
-static bool check_eval_task(struct thread_data_t *thread_data) {
-	// TODO:
-	//	* check current task is exists in tuple space
-	//	* if not, finish current thread.
-	//	* start processing otherwise
-	//
-	// TODO:
-	//	* create a process which polling a tuple space to find new tasks to
-	//		execute.
-	//	* If the task is found, evaluate it.
-	return true;
-}
-
-static void on_thread_create(struct thread_data_t *thread_data) {
-	struct single_thread_configuration_t *conf = init_thread();
-	assert(conf);
-
-	thread_data->conf = conf;
-
-	bool task_found = check_eval_task(thread_data);
-	if (task_found) {
-		thread_data->ret = thread_data->cb(thread_data->arg);
-		postprocess_thread(thread_data);
-	}
-
-	destroy_thread_data(thread_data);
-}
-
 int TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, void *arg) {
 	assert(name);
+
+	log_t("Trying to eval tuple with name %s", name);
 
 	struct thread_data_t *thread_data = (struct thread_data_t *)calloc(1, sizeof(struct thread_data_t));
 	assert(thread_data);
