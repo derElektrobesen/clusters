@@ -21,6 +21,18 @@
 
 void clock_gettime_impl(struct timespec *ts);
 
+#define KiB * 1024
+#define Mb KiB * 1024
+#define MAX_LOG_LINE (1 KiB)
+
+#define STR(...) STR_I(__VA_ARGS__)
+#define STR_I(...) #__VA_ARGS__
+
+#define COMBINE2(A, B) A ## B
+#define COMBINE(A, B) COMBINE2(A, B)
+
+extern __thread char log_line[];
+
 #define _warn(fmt, ...) ({									\
 	struct timespec time;									\
 	clock_gettime_impl(&time);								\
@@ -32,7 +44,9 @@ void clock_gettime_impl(struct timespec *ts);
 	size_t ret = strftime(time_str, sizeof(time_str), "%d.%m.%Y %H:%M:%S", &tm);		\
 	snprintf(time_str + ret, sizeof(time_str) - ret, ".%.06ld", time.tv_nsec / 1000);	\
 												\
-	printf("[%s] [%20s:%-4d] " fmt "\n", time_str, __FILE__, __LINE__, ## __VA_ARGS__);	\
+	ret = snprintf(log_line, MAX_LOG_LINE,							\
+		"[%s] [%20s:%-4d] " fmt "\n", time_str, __FILE__, __LINE__, ## __VA_ARGS__);	\
+	push_log(log_line, ret);								\
 })
 
 #define log_e(fmt, ...) _warn("[E] " fmt, ## __VA_ARGS__)
@@ -45,5 +59,9 @@ void clock_gettime_impl(struct timespec *ts);
 #else
 #define log_t(...)
 #endif
+
+void process_log_queue(void *arg __attribute__((unused)));
+void push_log(const char *str, int str_len);
+void destroy_log();
 
 #endif

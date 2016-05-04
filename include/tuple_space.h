@@ -50,11 +50,6 @@ int TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, vo
 TUPLE_SPACE_SUPPORTED_PRAGMAS(DECL_PRAGMA_PROCESSOR)
 #undef DECL_PRAGMA_PROCESSOR
 
-#define STR(...) STR_I(__VA_ARGS__)
-#define STR_I(...) #__VA_ARGS__
-
-#define COMBINE2(A, B) A ## B
-#define COMBINE(A, B) COMBINE2(A, B)
 #define __prgm(t, ...) ({						\
 	int COMBINE(ret_, __LINE__) = false;				\
 	_Pragma(STR(tnt t COMBINE(ret_, __LINE__), __VA_ARGS__;))	\

@@ -534,6 +534,9 @@ static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_typ
 		assert(ret);									\
 		*ret = 1;									\
 												\
+		log_d("Trying to process %s pragma, n_args == %u", #name, n_args);		\
+												\
+												\
 		if (!n_args)									\
 			return;									\
 												\
@@ -549,7 +552,7 @@ static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_typ
 		va_start (ap, n_args);								\
 												\
 		for (unsigned i = 0; i < n_args; ++i) {						\
-			log_d("Processing %d arg from %d", i, n_args);				\
+			log_t("Processing %d arg from %d", i, n_args);				\
 			prc.args[i] = va_arg(ap, struct tuple_space_expr_t *);			\
 			assert(prc.args[i]);							\
 		}										\
@@ -562,10 +565,15 @@ TUPLE_SPACE_SUPPORTED_PRAGMAS(MK_PRAGMA_PROCESSOR)
 
 #undef MK_PRAGMA_PROCESSOR
 
+extern bool can_write_log;
+
 __attribute__((destructor))
 static void tuple_space_destroy() {
+	log_d("Trying to destroy thread pool...");
+	destroy_log();
 	struct tuple_space_configuration_t *conf = &tuple_space_configuration;
-	threadpool_destroy(conf->thread_pool, 0);
+	threadpool_destroy(conf->thread_pool, threadpool_graceful);
+	log_d("Thread pool successfully destroyed");
 }
 
 static void tuple_space_destroy_cur_thread_data(struct single_thread_t *conf) {
@@ -688,19 +696,32 @@ static bool check_eval_task(struct thread_data_t *thread_data) {
 }
 
 static void on_thread_create(struct thread_data_t *thread_data) {
+	log_d("Evaluation with name %s was started", thread_data->name);
+
 	struct single_thread_t *conf = get_thread_conf();
 	assert(conf);
 
-	log_t("Evaluation with name %s was started", thread_data->name);
 	set_thread_cross_pointers(thread_data, conf);
 
 	bool task_found = check_eval_task(thread_data);
 	if (task_found) {
-		thread_data->ret = thread_data->cb(thread_data->arg);
+		thread_data->ret = thread_data->cb(thread_data->arg); // TODO: process ret value !!!
 		postprocess_thread(thread_data);
 	}
 
+	log_d("Evaluation with name %s was done, ret == %d", thread_data->name, thread_data->ret);
+
 	destroy_thread_data(thread_data);
+}
+
+__attribute__((constructor))
+static void init_pool() {
+	log_d("Trying to create thread pool, n_threads == %d, queue_size == %d", N_THREADS, QUEUE_SIZE);
+
+	tuple_space_configuration.thread_pool = threadpool_create(N_THREADS, QUEUE_SIZE, 0);
+	threadpool_add(tuple_space_configuration.thread_pool, (void (*)(void *))process_log_queue, NULL, 0);
+
+	log_d("Thread pool created");
 }
 
 int tuple_space_set_configuration_ex(const char *host, uint16_t port,
@@ -726,7 +747,6 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 	memcpy(&tuple_space_configuration.req_timeout, req_timeout, sizeof(*req_timeout));
 
 	tuple_space_configuration.port = port;
-	tuple_space_configuration.thread_pool = threadpool_create(N_THREADS, QUEUE_SIZE, 0);
 
 	struct thread_data_t *thread_data = (struct thread_data_t *)calloc(1, sizeof(struct thread_data_t));
 	assert(thread_data);
@@ -743,7 +763,7 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 int TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, void *arg) {
 	assert(name);
 
-	log_t("Trying to eval tuple with name %s", name);
+	log_d("Trying to eval tuple with name %s", name);
 
 	struct thread_data_t *thread_data = (struct thread_data_t *)calloc(1, sizeof(struct thread_data_t));
 	assert(thread_data);
@@ -755,6 +775,8 @@ int TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, vo
 
 	preprocess_thread(thread_data);
 	threadpool_add(tuple_space_configuration.thread_pool, (void (*)(void *))on_thread_create, thread_data, 0);
+
+	log_d("Eval stmt was pushed into queue");
 
 	return 0;
 }
