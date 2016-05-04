@@ -1,8 +1,9 @@
 #!/bin/bash
 
-export PATH="/Users/p.bereznoy/projects/clang/build/bin:$PATH"
-CC="clang"
-CXX="clang"
+CLANG_PATH=/Users/p.bereznoy/projects/clang/build/bin
+export PATH="$CLANG_PATH:$PATH"
+CC="$CLANG_PATH/clang"
+CXX="$CLANG_PATH/clang"
 
 aclocal
 autoconf

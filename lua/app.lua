@@ -12,6 +12,7 @@ box.cfg {
 	username = "p.bereznoy",
 	listen = listen,
 	log_level = 5,
+	background = true,
 }
 
 box.once("initialization", function ()

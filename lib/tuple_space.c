@@ -16,6 +16,10 @@
 
 #include "threadpool.h"
 
+#define LUA_in_FUNC "tuple_space.get_tuple"
+#define LUA_rd_FUNC "tuple_space.read_tuple"
+#define LUA_out_FUNC "tuple_space.add_tuple"
+
 #define TUPLE_SPACE_COMM_T(t) tuple_space_comm_ ## t ## _type
 #define TUPLE_SPACE_FORM_T(t) tuple_space_form_ ## t ## _type
 #define TUPLE_SPACE_ARR_T(t)  tuple_space_arr_  ## t ## _type
@@ -34,6 +38,9 @@
 enum tuple_space_pragma_type_t {
 #	define HELPER(n) PRAGMA_TYPE(n),
 	TUPLE_SPACE_SUPPORTED_PRAGMAS(HELPER)
+
+	tuple_space_max_auto_pragma_type,
+
 	HELPER(eval)
 #	undef HELPER
 
@@ -137,8 +144,8 @@ struct tuple_space_configuration_t {
 	char host[255];
 	uint16_t port;
 
-	struct timeval *conn_timeout;
-	struct timeval *req_timeout;
+	struct timeval conn_timeout;
+	struct timeval req_timeout;
 
 	threadpool_t *thread_pool;
 	pthread_key_t threads_key; // key, shared by all threads. Used to get thread-specific data from storage
@@ -152,13 +159,15 @@ struct tuple_space_processor_t {
 	struct tuple_space_expr_t **args;
 	unsigned n_args;
 
-	struct tnt_stream *stream;
-	struct thread_data_t *this_task;
+	struct thread_data_t *this_task; // This needed to get current task name and
+					 // current thread configuration
 };
 
-struct single_thread_configuration_t {
+struct single_thread_t {
 	struct tnt_stream *tnt;
+	struct tnt_request *request;
 	struct tnt_reply *reply;
+	struct tnt_stream *stream;
 
 	struct thread_data_t *current_eval; // XXX: Don't destroy this object
 };
@@ -169,11 +178,11 @@ struct thread_data_t {
 	char name[512];
 	int ret;
 
-	struct single_thread_configuration_t *conf;
+	struct single_thread_t *thread;
 };
 
 static void destroy_thread_data(struct thread_data_t *thd) {
-	thd->conf->current_eval = NULL; // current thread ahven't got a task
+	thd->thread->current_eval = NULL; // current thread haven't got a task
 	free(thd);
 }
 
@@ -264,13 +273,36 @@ static void dump_pragma(enum tuple_space_pragma_type_t pragma_type, const struct
 #endif // DEBUG
 
 __attribute__((nonnull))
+inline static struct tnt_stream *get_tnt(const struct tuple_space_processor_t *prc) {
+	assert(prc->this_task && prc->this_task->thread);
+	return prc->this_task->thread->tnt;
+}
+
+__attribute__((nonnull))
+inline static struct tnt_request *get_req(const struct tuple_space_processor_t *prc) {
+	assert(prc->this_task && prc->this_task->thread);
+	return prc->this_task->thread->request;
+}
+
+__attribute__((nonnull))
+inline static uint32_t get_req_sync(const struct tuple_space_processor_t *prc) {
+	struct tnt_request *req = get_req(prc);
+	assert(req);
+
+	return req->hdr.sync;
+}
+
+inline static struct tnt_stream *get_stream(const struct tuple_space_processor_t *prc) {
+	assert(prc->this_task && prc->this_task->thread);
+	return prc->this_task->thread->stream;
+}
+
+__attribute__((nonnull))
 static void tuple_space_pragma_cleanup(struct tuple_space_processor_t *prc) {
 	for (int i = 0; i < prc->n_args; ++i) {
 		free(prc->args[i]);
 	}
 	free(prc->args);
-
-	tnt_stream_free(prc->stream);
 
 	memset(prc, 0, sizeof(*prc)); // don't free prc: allocated on stack
 }
@@ -350,10 +382,8 @@ static void tuple_space_init_stream_expr(struct tnt_stream *s, struct tuple_spac
 }
 
 __attribute__((nonnull))
-static void tuple_space_mk_stream(struct tuple_space_processor_t *prc) {
-	assert(prc->stream);
-
-	struct tnt_stream *tuple = prc->stream;
+static void tuple_space_mk_request_args(struct tuple_space_processor_t *prc) {
+	struct tnt_stream *tuple = get_stream(prc);
 
 	tnt_object_add_array(tuple, prc->n_args);
 	for (int i = 0; i < prc->n_args; ++i) {
@@ -396,56 +426,103 @@ static void tuple_space_mk_stream(struct tuple_space_processor_t *prc) {
 			default:
 				assert(!"Unexpected expression found");
 		}
+
+#		undef COMM
+#		undef FORM
+#		undef ARR
+#		undef FARR
+
 	}
 }
 
-static struct single_thread_configuration_t *mk_thread_data() {
-	struct single_thread_configuration_t *th =
-		(struct single_thread_configuration_t *)calloc(1, sizeof(struct single_thread_configuration_t));
+static struct single_thread_t *mk_thread_data() {
+	struct single_thread_t *th =
+		(struct single_thread_t *)calloc(1, sizeof(struct single_thread_t));
 	assert(th);
 
 	pthread_setspecific(tuple_space_configuration.threads_key, th);
 	return th;
 }
 
-static int tuple_space_connect(struct single_thread_configuration_t *thread_conf);
-static struct single_thread_configuration_t *get_thread_conf() {
-	struct single_thread_configuration_t *conf = pthread_getspecific(tuple_space_configuration.threads_key);
+static int tuple_space_connect(struct single_thread_t *thread_conf);
+static struct single_thread_t *get_thread_conf() {
+	struct single_thread_t *conf = pthread_getspecific(tuple_space_configuration.threads_key);
 	if (!conf) {
 		conf = mk_thread_data();
-		tuple_space_connect(conf); // XXX: pass thread conf here
+		tuple_space_connect(conf);
 	}
 
 	return conf;
 }
 
 __attribute__((nonnull))
+static bool tuple_space_send_request_to_tarantool(const char *lua_func_name, const struct tuple_space_processor_t *prc) {
+	log_i("Trying to call %s tarantool's function", lua_func_name);
+
+	struct tnt_stream *tnt = get_tnt(prc);
+	assert(tnt);
+
+	struct tnt_request *req = prc->this_task->thread->request
+		= tnt_request_call(prc->this_task->thread->request);
+	assert(req);
+
+	if (tnt_request_set_funcz(req, lua_func_name) == -1) {
+		log_e("Can't set function name: %s", lua_func_name);
+		return false;
+	}
+
+	if (tnt_request_set_tuple(req, get_stream(prc)) == -1) {
+		log_e("Can't set function args: %s", lua_func_name);
+		return false;
+	}
+
+	if (tnt_request_compile(tnt, req) == -1) {
+		log_e("Can't compile tnt request, func name: %s, error: %s", lua_func_name, tnt_strerror(tnt));
+		return false;
+	}
+
+	log_i("Function %s was called, sync = %u", lua_func_name, get_req_sync(prc));
+
+	return true;
+}
+
+__attribute__((nonnull))
 static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_type, struct tuple_space_processor_t *prc) {
-	assert(pragma_type < tuple_space_max_pragma_type);
+	assert(pragma_type >= 0 && pragma_type < tuple_space_max_auto_pragma_type);
 
 	dump_pragma(pragma_type, prc);
 
-	prc->stream = tnt_object(NULL);
-	tuple_space_mk_stream(prc);
+	struct single_thread_t *th = get_thread_conf();
+	assert(th && th->current_eval && th->current_eval->thread);
 
-	struct single_thread_configuration_t *conf = get_thread_conf();
-	assert(conf && conf->current_eval && conf->current_eval->conf);
+	prc->this_task = th->current_eval;
 
-	prc->this_task = conf->current_eval;
-
-	bool ret = false;
-	switch (pragma_type) {
+	struct local_processor_t {
+		const char *lua_func_name;
+		bool (*processor)(struct tuple_space_processor_t *);
+	} pragma_processors[] = {
 #		define HELPER(n)								\
-		case PRAGMA_TYPE(n):								\
-			ret = tuple_space_process_ ## n ## _pragma(prc);			\
-			break;
+		[PRAGMA_TYPE(n)] = {								\
+			.lua_func_name = LUA_ ## n ## _FUNC,					\
+			.processor = tuple_space_process_ ## n ## _pragma,			\
+		},
 
 		TUPLE_SPACE_SUPPORTED_PRAGMAS(HELPER)
 
 #		undef HELPER
-		default:
-			assert(!"Invalid pragma type found!");
 	};
+
+	struct local_processor_t *processor = &pragma_processors[pragma_type];
+
+	prc->this_task->thread->stream = tnt_object(prc->this_task->thread->stream);
+	assert(prc->this_task->thread->stream);
+	tuple_space_mk_request_args(prc);
+
+	// send request into tarantool
+	tuple_space_send_request_to_tarantool(processor->lua_func_name, prc);
+
+	// parse tarantool response
+	bool ret = processor->processor(prc);
 
 	tuple_space_pragma_cleanup(prc);
 	return ret;
@@ -472,6 +549,7 @@ static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_typ
 		va_start (ap, n_args);								\
 												\
 		for (unsigned i = 0; i < n_args; ++i) {						\
+			log_d("Processing %d arg from %d", i, n_args);				\
 			prc.args[i] = va_arg(ap, struct tuple_space_expr_t *);			\
 			assert(prc.args[i]);							\
 		}										\
@@ -488,16 +566,14 @@ __attribute__((destructor))
 static void tuple_space_destroy() {
 	struct tuple_space_configuration_t *conf = &tuple_space_configuration;
 	threadpool_destroy(conf->thread_pool, 0);
-
-	if (conf->conn_timeout)
-		free(conf->conn_timeout);
-	if (conf->req_timeout)
-		free(conf->req_timeout);
 }
 
-static void tuple_space_destroy_cur_thread_data(struct single_thread_configuration_t *conf) {
+static void tuple_space_destroy_cur_thread_data(struct single_thread_t *conf) {
 	if (!conf)
 		return;
+
+	if (conf->request)
+		tnt_request_free(conf->request);
 
 	if (conf->reply)
 		tnt_reply_free(conf->reply);
@@ -507,13 +583,16 @@ static void tuple_space_destroy_cur_thread_data(struct single_thread_configurati
 		tnt_stream_free(conf->tnt);
 	}
 
+	if (conf->stream)
+		tnt_stream_free(conf->stream);
+
 	free(conf);
 	pthread_setspecific(tuple_space_configuration.threads_key, NULL);
 }
 
-static int tuple_space_ping(struct single_thread_configuration_t *thread_conf) {
+static int tuple_space_ping(struct single_thread_t *thread_conf) {
 	struct tuple_space_configuration_t *conf = &tuple_space_configuration;
-	log_i("Sending ping to %s:%d...", conf->host, conf->port);
+	log_w("Sending ping to %s:%d...", conf->host, conf->port);
 
 	tnt_ping(thread_conf->tnt);
 	thread_conf->reply = tnt_reply_init(thread_conf->reply);
@@ -528,16 +607,16 @@ static int tuple_space_ping(struct single_thread_configuration_t *thread_conf) {
 		return -1;
 	}
 
-	log_i("Ping done");
+	log_w("Ping done");
 	return 0;
 }
 
-static int tuple_space_connect(struct single_thread_configuration_t *thread_conf) {
+static int tuple_space_connect(struct single_thread_t *thread_conf) {
 	struct tuple_space_configuration_t *conf = &tuple_space_configuration;
 
 	bool reconnecting = false;
 	if (thread_conf->tnt) {
-		log_i("Reconnecting...");
+		log_w("Reconnecting to tuple space...");
 		reconnecting = true;
 	}
 
@@ -557,18 +636,8 @@ static int tuple_space_connect(struct single_thread_configuration_t *thread_conf
 		tnt_set(thread_conf->tnt, TNT_OPT_SEND_BUF, 0); // disable buffering for send
 		tnt_set(thread_conf->tnt, TNT_OPT_RECV_BUF, 0); // disable buffering for recv
 
-		struct timeval default_conn_timeout = { .tv_sec = 1, .tv_usec = 0,  },
-			       default_req_timeout = { .tv_sec = 0, .tv_usec = 500, };
-
-		struct timeval *conn_timeout = conf->conn_timeout;
-		struct timeval *req_timeout = conf->req_timeout;
-		if (!conn_timeout)
-			conn_timeout = &default_conn_timeout;
-		if (!req_timeout)
-			req_timeout = &default_req_timeout;
-
-		tnt_set(thread_conf->tnt, TNT_OPT_TMOUT_CONNECT, conn_timeout);
-		tnt_set(thread_conf->tnt, TNT_OPT_TMOUT_SEND, req_timeout);
+		tnt_set(thread_conf->tnt, TNT_OPT_TMOUT_CONNECT, &conf->conn_timeout);
+		tnt_set(thread_conf->tnt, TNT_OPT_TMOUT_SEND, &conf->req_timeout);
 	}
 
 	if (tnt_connect(thread_conf->tnt) == -1) {
@@ -577,16 +646,16 @@ static int tuple_space_connect(struct single_thread_configuration_t *thread_conf
 		return -1;
 	}
 
-	log_i("Connected to %s:%u", conf->host, conf->port);
+	log_w("Connected to %s:%u", conf->host, conf->port);
 	return tuple_space_ping(thread_conf);
 }
 
 __attribute__((nonnull))
-static void set_thread_cross_pointers(struct thread_data_t *thread_data, struct single_thread_configuration_t *conf) {
-	assert(!conf->current_eval);
+static void set_thread_cross_pointers(struct thread_data_t *thread_data, struct single_thread_t *th) {
+	assert(!th->current_eval);
 
-	thread_data->conf = conf;
-	conf->current_eval = thread_data;
+	thread_data->thread = th;
+	th->current_eval = thread_data;
 }
 
 static void preprocess_thread(struct thread_data_t *thread_data) {
@@ -619,7 +688,7 @@ static bool check_eval_task(struct thread_data_t *thread_data) {
 }
 
 static void on_thread_create(struct thread_data_t *thread_data) {
-	struct single_thread_configuration_t *conf = get_thread_conf();
+	struct single_thread_t *conf = get_thread_conf();
 	assert(conf);
 
 	log_t("Evaluation with name %s was started", thread_data->name);
@@ -645,14 +714,16 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 	// initialize thread key
 	pthread_key_create(&tuple_space_configuration.threads_key, (void (*)(void *))&tuple_space_destroy_cur_thread_data);
 
-	if (conn_timeout) {
-		tuple_space_configuration.conn_timeout = (struct timeval *)malloc(sizeof(struct timeval));
-		memcpy(tuple_space_configuration.conn_timeout, conn_timeout, sizeof(*conn_timeout));
-	}
-	if (req_timeout) {
-		tuple_space_configuration.req_timeout = (struct timeval *)malloc(sizeof(struct timeval));
-		memcpy(tuple_space_configuration.req_timeout, req_timeout, sizeof(*req_timeout));
-	}
+	struct timeval default_conn_timeout = { .tv_sec = 1, .tv_usec = 0,  },
+		       default_req_timeout = { .tv_sec = 0, .tv_usec = 500, };
+
+	if (!conn_timeout)
+		conn_timeout = &default_conn_timeout;
+	if (!req_timeout)
+		req_timeout = &default_req_timeout;
+
+	memcpy(&tuple_space_configuration.conn_timeout, conn_timeout, sizeof(*conn_timeout));
+	memcpy(&tuple_space_configuration.req_timeout, req_timeout, sizeof(*req_timeout));
 
 	tuple_space_configuration.port = port;
 	tuple_space_configuration.thread_pool = threadpool_create(N_THREADS, QUEUE_SIZE, 0);
@@ -663,7 +734,7 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 	snprintf(thread_data->name, sizeof(thread_data->name), "__main_thread__");
 	preprocess_thread(thread_data);
 
-	struct single_thread_configuration_t *conf = get_thread_conf(); // init main thread
+	struct single_thread_t *conf = get_thread_conf(); // init main thread
 	set_thread_cross_pointers(thread_data, conf);
 
 	return 0;

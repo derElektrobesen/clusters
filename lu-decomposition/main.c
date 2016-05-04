@@ -7,7 +7,7 @@ int to_eval(void *x) {
 }
 
 int main() {
-	//tuple_space_set_configuration(TUPLE_SPACE_HOST, TUPLE_SPACE_PORT);
+	tuple_space_set_configuration(TUPLE_SPACE_HOST, TUPLE_SPACE_PORT);
 
 	char *str = "test";
 	int tuple[] = { 2, 5, 6, 8, 9 };
