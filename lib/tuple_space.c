@@ -355,16 +355,27 @@ inline static bool is_formal_scalar(struct tuple_space_expr_t *e) {
 }
 
 __attribute__((nonnull))
-static void tuple_space_init_stream_expr(struct tnt_stream *s, struct tuple_space_expr_t *e) {
-	int n_args = is_formal_scalar(e) ? 1 : 2;
+inline static bool is_formal_array(struct tuple_space_expr_t *e) {
+#	define X(t, n, ...) || (e->type == TUPLE_SPACE_FARR_T(n))
+	return false TUPLE_SPACE_SUPPORTED_TYPES(X);
+#	undef X
+}
 
-	tnt_object_add_array(s, n_args);
+__attribute__((nonnull))
+inline static bool is_formal(struct tuple_space_expr_t *e) {
+	return is_formal_scalar(e) || is_formal_array(e);
+}
+
+__attribute__((nonnull))
+static void tuple_space_init_stream_expr(struct tnt_stream *s, struct tuple_space_expr_t *e) {
+	tnt_object_add_array(s, is_formal_array(e) ? 3 : 2);
 	const char *name = NULL;
+	const char *__typename = NULL;
 
 #	define COMM(t, n, ...) case TUPLE_SPACE_COMM_T(n): name = #n; break;
-#	define FORM(t, n, ...) case TUPLE_SPACE_FORM_T(n): name = "formal_" #n; break;
+#	define FORM(t, n, ...) case TUPLE_SPACE_FORM_T(n): name = "formal"; __typename = #n; break;
 #	define ARR(t, n, ...)  case TUPLE_SPACE_ARR_T(n):  name = "array_" #n; break;
-#	define FARR(t, n, ...) case TUPLE_SPACE_FARR_T(n): name = "formal_array_" #n; break;
+#	define FARR(t, n, ...) case TUPLE_SPACE_FARR_T(n): name = "formal_array"; __typename = #n; break;
 
 	switch (e->type) {
 		TUPLE_SPACE_PROCESS_TYPES(COMM, FORM, ARR, FARR)
@@ -379,6 +390,11 @@ static void tuple_space_init_stream_expr(struct tnt_stream *s, struct tuple_spac
 	assert(name);
 
 	tnt_object_add_strz(s, name);
+
+	if (is_formal(e)) {
+		assert(__typename);
+		tnt_object_add_strz(s, __typename);
+	}
 }
 
 __attribute__((nonnull))
@@ -565,8 +581,6 @@ TUPLE_SPACE_SUPPORTED_PRAGMAS(MK_PRAGMA_PROCESSOR)
 
 #undef MK_PRAGMA_PROCESSOR
 
-extern bool can_write_log;
-
 __attribute__((destructor))
 static void tuple_space_destroy() {
 	log_d("Trying to destroy thread pool...");
@@ -626,6 +640,8 @@ static int tuple_space_connect(struct single_thread_t *thread_conf) {
 	if (thread_conf->tnt) {
 		log_w("Reconnecting to tuple space...");
 		reconnecting = true;
+	} else {
+		log_w("Trying to connect to %s:%u", conf->host, conf->port);
 	}
 
 	thread_conf->tnt = tnt_net(thread_conf->tnt);

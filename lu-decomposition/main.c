@@ -3,6 +3,9 @@
 float test() { return 2.5; }
 
 int to_eval(void *x) {
+	for (int i = 0; i < 10; ++i) {
+		out("test", i);
+	}
 	return 0;
 }
 
@@ -20,10 +23,13 @@ int main() {
 
 	//int arr[5] = { 1, 2, 3, 4, 5 };
 
+	eval("test", &to_eval, str);
+	eval("test", &to_eval, str);
+	eval("test", &to_eval, str);
+	eval("test", &to_eval, str);
+
 	int ret = out(1, 2, 3, "test", str);
 	in(a, ?to_store, test(), tuple, tuple_2, ?tuple_3, ?tuple_2, str);
-
-	eval("test", &to_eval, str);
 
 	return ret;
 }

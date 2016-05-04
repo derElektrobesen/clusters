@@ -13,6 +13,8 @@
 
 #include <sys/types.h>
 #include <sys/time.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include <time.h>
 #include <stdio.h>
@@ -44,8 +46,10 @@ extern __thread char log_line[];
 	size_t ret = strftime(time_str, sizeof(time_str), "%d.%m.%Y %H:%M:%S", &tm);		\
 	snprintf(time_str + ret, sizeof(time_str) - ret, ".%.06ld", time.tv_nsec / 1000);	\
 												\
+	pthread_t ptid = pthread_self();							\
 	ret = snprintf(log_line, MAX_LOG_LINE,							\
-		"[%s] [%20s:%-4d] " fmt "\n", time_str, __FILE__, __LINE__, ## __VA_ARGS__);	\
+		"[%s] [%10u] [%20s:%-4d] " fmt "\n", time_str, (unsigned)ptid,			\
+			__FILE__, __LINE__, ## __VA_ARGS__);					\
 	push_log(log_line, ret);								\
 })
 
