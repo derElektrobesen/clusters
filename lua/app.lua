@@ -241,6 +241,7 @@ function Tuple:new(t)
 		size = 0,
 		type_id_idx = box.space.types.index.tuple_type_id,
 		type_str_idx = box.space.types.index.tuple_type_str,
+		tuple_pri_idx = box.space.tuples.index.required_unique,
 		tuple_idx = box.space.tuples.index.primary,
 		tuple_idx_prm = box.space.tuples.index.primary_with_id,
 	}
@@ -349,14 +350,13 @@ function Tuple:find_type(exact)
 
 			local equal = true
 			for i, v in ipairs(lens) do
-				if v ~= _type.sizes[i] and
-						(self.items[i]:isFormal() or exact or v > _type.sizes[i]) then
+				if v ~= _type.sizes[i] and (exact or not self.items[i]:isFormal() or v < _type.sizes[i]) then
 					-- for non-exact match, when current item is formal,
 					-- following sizes should be equal:
 					-- lens:	{ 0, 2, 4 }
 					-- _type.sizes:	{ 0, 2, 3 }
 					--
-					-- formal args should be strictly matched
+					-- not formal args should be strictly matched
 					equal = false
 					break
 				end
@@ -367,7 +367,7 @@ function Tuple:find_type(exact)
 
 			if equal and exact then
 				return found_tid
-			elseif exact and (found_type_size == nil or found_type_size > found_tsize) then
+			elseif equal and (found_type_size == nil or found_type_size > found_tsize) then
 				-- for non-exact match, tuple with minimum size will be returned
 				found_type_id = found_tid
 				found_type_size = found_tsize
@@ -428,14 +428,14 @@ function Tuple:iterateCloud(type_id)
 		local idx = nil
 		while ret == nil do
 			idx = to_process[last_prc_idx]
-			ret = self.tuple_idx:delete(idx[1]) -- we mark tuple as 'in process'
+			ret = self.tuple_pri_idx:delete({ idx[1] }) -- we mark tuple as 'in process'
 			last_prc_idx = last_prc_idx + 1
 			if ret == nil and last_prc_idx > #to_process and not __expand() then
 				return nil
 			end
 		end
 
-		return idx, { select(__tuples_tuple_data_off + 1, unpack(ret)) }
+		return idx, { select(__tuples_tuple_data_off + 1, ret:unpack()) }
 	end
 end
 
@@ -468,7 +468,8 @@ function Tuple:_select(need_remove)
 		end
 		if (not need_remove) or (not ok) then
 			-- move tuple back in cloud
-			box.space.tuples:insert({ unpack(idx), unpack(t) })
+			-- Double unpack in one stmt works incorrect => hack with indexes
+			box.space.tuples:insert({ idx[1], idx[2], unpack(t) })
 		end
 		if ok then
 			return t
