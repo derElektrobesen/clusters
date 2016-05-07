@@ -366,26 +366,38 @@ inline static bool is_formal(struct tuple_space_expr_t *e) {
 	return is_formal_scalar(e) || is_formal_array(e);
 }
 
+__attribute__((nonull))
+inline static bool is_array(struct tuple_space_expr_t *e) {
+#	define X(t, n, ...) || (e->type == TUPLE_SPACE_ARR_T(n))
+	return is_formal_array(e) TUPLE_SPACE_SUPPORTED_TYPES(X);
+#	undef X
+}
+
 __attribute__((nonnull))
 static void tuple_space_init_stream_expr(struct tnt_stream *s, struct tuple_space_expr_t *e) {
-	tnt_object_add_array(s, is_formal_array(e) ? 3 : 2);
+	tnt_object_add_array(s, is_array(e) ? 3 : 2);
 	const char *name = NULL;
 	const char *__typename = NULL;
 
-#	define COMM(t, n, ...) case TUPLE_SPACE_COMM_T(n): name = #n; break;
-#	define FORM(t, n, ...) case TUPLE_SPACE_FORM_T(n): name = "formal"; __typename = #n; break;
-#	define ARR(t, n, ...)  case TUPLE_SPACE_ARR_T(n):  name = "array_" #n; break;
-#	define FARR(t, n, ...) case TUPLE_SPACE_FARR_T(n): name = "formal_array"; __typename = #n; break;
+	if (e->type == TUPLE_SPACE_ARR_T(char)) {
+		// array of characters is the same as a string here
+		name = "char_ptr"; // just a hack
+	} else {
+		switch (e->type) {
+#		define COMM(t, n, ...) case TUPLE_SPACE_COMM_T(n): name = #n; break;
+#		define FORM(t, n, ...) case TUPLE_SPACE_FORM_T(n): name = "formal"; __typename = #n; break;
+#		define ARR(t, n, ...)  case TUPLE_SPACE_ARR_T(n):  name = "array_" #n; break;
+#		define FARR(t, n, ...) case TUPLE_SPACE_FARR_T(n): name = "formal"; __typename = "array_" #n; break;
 
-	switch (e->type) {
-		TUPLE_SPACE_PROCESS_TYPES(COMM, FORM, ARR, FARR)
-		default: break;
-	};
+			TUPLE_SPACE_PROCESS_TYPES(COMM, FORM, ARR, FARR)
+			default: break;
 
-#	undef COMM
-#	undef FORM
-#	undef ARR
-#	undef FARR
+#		undef COMM
+#		undef FORM
+#		undef ARR
+#		undef FARR
+		};
+	}
 
 	assert(name);
 
@@ -426,6 +438,7 @@ static void tuple_space_mk_request_args(struct tuple_space_processor_t *prc) {
 #		define FORM(t, n, ...) case TUPLE_SPACE_FORM_T(n): break; /* nothing to do */
 #		define ARR(t, n, ...)								\
 			case TUPLE_SPACE_ARR_T(n): {						\
+				tnt_object_add_int(tuple, (int64_t)e->TUPLE_SPACE_ARR_V(n).s);	\
 				tnt_object_add_array(tuple, e->TUPLE_SPACE_ARR_V(n).s);		\
 				for (int i = 0; i < e->TUPLE_SPACE_ARR_V(n).s; ++i) {		\
 					tuple_space_tuple_add_ ## n(tuple, e->TUPLE_SPACE_ARR_V(n).v[i]); \

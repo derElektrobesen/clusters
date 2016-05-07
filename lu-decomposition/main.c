@@ -2,9 +2,9 @@
 
 float test() { return 2.5; }
 
-int to_eval(void *x) {
+int to_eval(char *x) {
 	for (int i = 0; i < 10; ++i) {
-		out("test", i);
+		out("test", i, x);
 	}
 	return 0;
 }
@@ -23,10 +23,10 @@ int main() {
 
 	//int arr[5] = { 1, 2, 3, 4, 5 };
 
-	eval("test", &to_eval, str);
-	eval("test", &to_eval, str);
-	eval("test", &to_eval, str);
-	eval("test", &to_eval, str);
+	eval("test1", (tuple_space_cb_t)&to_eval, str);
+	eval(str, (tuple_space_cb_t)&to_eval, str);
+	eval("test2", (tuple_space_cb_t)&to_eval, str);
+	eval("test3", (tuple_space_cb_t)&to_eval, str);
 
 	int ret = out(1, 2, 3, "test", str);
 	in(a, ?to_store, test(), tuple, tuple_2, ?tuple_3, ?tuple_2, str);
