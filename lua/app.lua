@@ -27,6 +27,10 @@ local __types_tuple_size = 4
 local __types_tuple_sizes_list = 5
 local __types_max_id = 5
 
+local __tuples_tuple_data_off = 2 -- used to move to user data into tarantool's tuple
+
+local __select_limit = 1000
+
 box.once("space_creation", function ()
 	-- Space contains a list of types.
 	--	{ 'type_id', 'type_1', 'type_2', ... }
@@ -55,7 +59,7 @@ box.once("space_creation", function ()
 
 	-- Space contains a list of tuples of type specified.
 	--	{ 'id', 'type_id', ... }
-	-- XXX: set tuples_data_offset if scheme will be changed
+	-- XXX: set __tuples_tuple_data_off if scheme will be changed
 	s = box.schema.space.create('tuples')
 	s:create_index('required_unique', {
 		type = 'tree',
@@ -68,6 +72,14 @@ box.once("space_creation", function ()
 		unique = false,
 		parts = {
 			2, 'NUM',	-- tuple type
+		},
+	})
+	s:create_index('primary_with_id', {
+		type = 'tree',
+		unique = true,
+		parts = {
+			1, 'NUM',
+			2, 'NUM',
 		},
 	})
 end)
@@ -227,8 +239,10 @@ function Tuple:new(t)
 	local tuple = {
 		items = {},
 		size = 0,
-		types_idx = box.space.types.index,
-		tuple_idx = box.space.tuples.index,
+		type_id_idx = box.space.types.index.tuple_type_id,
+		type_str_idx = box.space.types.index.tuple_type_str,
+		tuple_idx = box.space.tuples.index.primary,
+		tuple_idx_prm = box.space.tuples.index.primary_with_id,
 	}
 
 	log.info("Tuple came: " .. json.encode(t))
@@ -278,7 +292,7 @@ function Tuple:hasFormals()
 	return false
 end
 
-function Tuple:iterate_types()
+function Tuple:iterate()
 	local types = {}
 	local sizes = {}
 	for _, v in ipairs(self.items) do
@@ -307,14 +321,14 @@ end
 -- type id will be returned here
 -- if <exact> arg is set, total tuple length will be also checked
 function Tuple:find_type(exact)
-	local type_it = self:iterate_types()
+	local type_it = self:iterate()
 	local _type = type_it()
 
 	if not _type then
 		_error("No items in tuple!")
 	end
 
-	local found_in_cloud = self.types_idx.tuple_type_str:select({ _type.str })
+	local found_in_cloud = self.type_str_idx:select({ _type.str })
 	if found_in_cloud == nil then
 		return nil
 	end
@@ -335,7 +349,14 @@ function Tuple:find_type(exact)
 
 			local equal = true
 			for i, v in ipairs(lens) do
-				if v ~= _type.sizes[i] then
+				if v ~= _type.sizes[i] and
+						(self.items[i]:isFormal() or exact or v > _type.sizes[i]) then
+					-- for non-exact match, when current item is formal,
+					-- following sizes should be equal:
+					-- lens:	{ 0, 2, 4 }
+					-- _type.sizes:	{ 0, 2, 3 }
+					--
+					-- formal args should be strictly matched
 					equal = false
 					break
 				end
@@ -357,11 +378,111 @@ function Tuple:find_type(exact)
 	return found_type_id
 end
 
+function Tuple:select()
+	return self:_select(true)
+end
+
+function Tuple:read()
+	return self:_select(false)
+end
+
+function Tuple:iterateCloud(type_id)
+	if type_id == nil then
+		_error("Can't iterate over nil key")
+	end
+
+	local to_process = {}
+	for _, v in ipairs(self.tuple_idx:select({ type_id }, { iterator = 'EQ', limit = __select_limit })) do
+		table.insert(to_process, { v[1], v[2] })
+	end
+
+	local last_prc_idx = 1
+
+	local __expand = function ()
+		if not #to_process then
+			return nil
+		end
+
+		local last_id = to_process[#to_process]
+
+		last_prc_idx = 1
+		to_process = {}
+
+		for _, v in ipairs(self.tuple_idx_prm:select(last_id, { iterator = 'GT', limit = __select_limit })) do
+			table.insert(to_process, { v[1], v[2] })
+		end
+
+		if not #to_process then
+			return nil
+		end
+
+		return 1
+	end
+
+	return function ()
+		if last_prc_idx > #to_process and not __expand() then
+			return nil
+		end
+
+		local ret = nil
+		local idx = nil
+		while ret == nil do
+			idx = to_process[last_prc_idx]
+			ret = self.tuple_idx:delete(idx[1]) -- we mark tuple as 'in process'
+			last_prc_idx = last_prc_idx + 1
+			if ret == nil and last_prc_idx > #to_process and not __expand() then
+				return nil
+			end
+		end
+
+		return idx, { select(__tuples_tuple_data_off + 1, unpack(ret)) }
+	end
+end
+
+function Tuple:_select(need_remove)
+	local type_id = self:find_type(false)
+	if type_id == nil then
+		log.info("Tuple with type " .. self:tostr() .. " not found in cloud")
+		return nil
+	end
+
+	-- select all tuples with specified type id and return first matched
+	for idx, t in self:iterateCloud(type_id) do
+		local ok = true
+		for i, item in ipairs(self.items) do
+			if not item:isFormal() then
+				if item:isArr() then
+					for j, v in ipairs(item:val()) do
+						if t[i][j] ~= v then
+							ok = false
+							break
+						end
+					end
+				else
+					ok = (item:val() == t[i])
+				end
+			end
+			if not ok then
+				break
+			end
+		end
+		if (not need_remove) or (not ok) then
+			-- move tuple back in cloud
+			box.space.tuples:insert({ unpack(idx), unpack(t) })
+		end
+		if ok then
+			return t
+		end
+	end
+
+	return nil
+end
+
 function Tuple:insert()
 	local type_id = self:find_type(true) -- exact type should be found
 	if type_id == nil then
 		-- insert new tuple into cloud
-		type_id = self.types_idx.tuple_type_id:max()
+		type_id = self.type_id_idx:max()
 		if type_id == nil then
 			type_id = 1
 		else
@@ -369,7 +490,7 @@ function Tuple:insert()
 		end
 
 		local type_str = nil
-		for it in self:iterate_types() do
+		for it in self:iterate() do
 			if type_str == nil then
 				type_str = "types: " .. it.str .. ", sizes: " .. json.encode(it.sizes)
 			end
@@ -410,10 +531,14 @@ tuple_space = {
 	read_tuple = function (...)
 		log.info("read_tuple was called")
 		local tuple = Tuple:new({...})
+
+		return tuple:read()
 	end,
 
 	get_tuple = function (...)
 		log.info("get_tuple was called")
 		local tuple = Tuple:new({...})
+
+		return tuple:select()
 	end,
 }
