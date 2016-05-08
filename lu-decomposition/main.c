@@ -5,6 +5,11 @@ float test() { return 2.5; }
 int to_eval(char *x) {
 	for (int i = 0; i < 10; ++i) {
 		out("test", i, x);
+		int dst;
+		if (i) {
+			in("test", ?dst, x);
+			log_e("FROM TUPLE: %d", dst);
+		}
 	}
 	return 0;
 }

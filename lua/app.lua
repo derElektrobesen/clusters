@@ -526,20 +526,33 @@ tuple_space = {
 			_error("Unexpected formals in tuple " .. tuple:tostr())
 		end
 
-		return tuple:insert() -- type_id will be returned
+		local type_id = tuple:insert()
+		log.info("Returning " .. type_id .. " to client");
 	end,
 
 	read_tuple = function (...)
 		log.info("read_tuple was called")
 		local tuple = Tuple:new({...})
 
-		return tuple:read()
+		local tup = tuple:read()
+		if tup then
+			log.info("Returning tuple to client: " .. json.encode(tup))
+		else
+			log.info("Returning nil to client")
+		end
+		return tup
 	end,
 
 	get_tuple = function (...)
 		log.info("get_tuple was called")
 		local tuple = Tuple:new({...})
 
-		return tuple:select()
+		local tup = tuple:select()
+		if tup then
+			log.info("Returning tuple to client: " .. json.encode(tup))
+		else
+			log.info("Returning nil to client")
+		end
+		return tup
 	end,
 }

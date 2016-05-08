@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <utils.h>
+#include <pthread.h>
 
 #define TUPLE_SPACE_SUPPORTED_TYPES(_)				\
 	_(char, char, "%c")				\
