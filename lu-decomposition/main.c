@@ -1,16 +1,22 @@
 #include "tuple_space.h"
+#include <time.h>
 
 float test() { return 2.5; }
 
 int to_eval(char *x) {
 	for (int i = 0; i < 10; ++i) {
-		out("test", i, x);
+		out("test", time(NULL), x);
 		int dst;
-		if (i) {
-			in("test", ?dst, x);
-			log_e("FROM TUPLE: %d", dst);
-		}
+		in("test", ?dst, x);
+		log_e("FROM TUPLE: %d", dst);
 	}
+	int tuple[3];
+	char *strings[3];
+	rd(2.0, 2.5, ?tuple, ?strings, "test");
+	for (int i = 0; i < 3; ++i)
+		log_e("INT: %d", tuple[i]);
+	for (int i = 0;i < 3; ++i)
+		log_e("STR: %s", strings[i]);
 	return 0;
 }
 
@@ -20,9 +26,7 @@ int main() {
 	char *str = "test";
 	int tuple[] = { 2, 5, 6, 8, 9 };
 	char *tuple_2[] = { "TEST 1", "HOHOHO", "LALALA" };
-	int tuple_3[5];
 	double a = 2;
-	int to_store;
 
 	//char test_c = 1;
 
@@ -34,7 +38,7 @@ int main() {
 	eval("test3", (tuple_space_cb_t)&to_eval, str);
 
 	int ret = out(1, 2, 3, "test", str);
-	in(a, ?to_store, test(), tuple, tuple_2, ?tuple_3, ?tuple_2, str);
+	out(a, test(), tuple, tuple_2, str);
 
 	return ret;
 }

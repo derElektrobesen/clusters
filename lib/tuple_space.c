@@ -204,6 +204,7 @@ static char *pool_alloc(struct eval_data_t *thd, uint32_t needed) {
 		else
 			thd->max_chunks *= 2;
 
+		log_t("Trying to realloc pool for %u chunks", thd->max_chunks);
 		thd->data_pool = (char **)realloc(thd->data_pool, sizeof(*thd->data_pool) * thd->max_chunks);
 	}
 
@@ -211,6 +212,8 @@ static char *pool_alloc(struct eval_data_t *thd, uint32_t needed) {
 
 	thd->data_pool[thd->n_chunks] = (char *)malloc(needed);
 	TS_ASSERT(thd->data_pool[thd->n_chunks]);
+
+	log_t("Number of used chunks is %u", thd->n_chunks + 1);
 
 	return thd->data_pool[thd->n_chunks++];
 }
@@ -428,6 +431,8 @@ static const char *tuple_space_decode_char_ptr(struct eval_data_t *eval, char **
 		return NULL;
 	}
 
+	log_t("Trying to allo c %u bytes for str %.*s", str_len + 1, str_len, str);
+
 	*dst = pool_alloc(eval, str_len + 1);
 	memcpy(*dst, str, str_len);
 	(*dst)[str_len] = '\0';
@@ -489,7 +494,7 @@ static const char *tuple_space_read_response_expr(struct eval_data_t *eval, stru
 		uint32_t n_items = mp_decode_array(&ptr);
 #		define HELPER(t, n, ...)							\
 			case TUPLE_SPACE_FARR_T(n): {						\
-				if (n_items != e->TUPLE_SPACE_FARR_V(n).s) {			\
+				if (n_items < e->TUPLE_SPACE_FARR_V(n).s) {			\
 					log_e("Too short tuple was read from tarantool. "	\
 						"At least %u elems are expected, but %u found",	\
 						e->TUPLE_SPACE_FARR_V(n).s, n_items);		\
@@ -538,7 +543,12 @@ static bool tuple_space_process_response_tuple(struct tuple_space_processor_t *p
 	struct tuple_space_expr_t **args = prc->args;
 	unsigned n_args = prc->n_args;
 
-	if (n_args < tuple_size) {
+	if (tuple_size == 1 && mp_typeof(*data) == MP_NIL) {
+		log_d("Nil was returned from tarantool");
+		return false;
+	}
+
+	if (n_args > tuple_size) {
 		log_e("Too short tuple was read from tarantool, minimum %u elems are expected, but %u found", n_args, tuple_size);
 		return false;
 	}
@@ -827,6 +837,10 @@ static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_typ
 	}
 
 	uint32_t n_items = mp_decode_array(&data);
+	if (n_items == 0) {
+		log_d("Nothing was returned from tarantool");
+		return false;
+	}
 	if (n_items != 1) {
 		log_w("Unexpected number of items in tuple wrapper: %u, 1 expected", n_items);
 		return false;
