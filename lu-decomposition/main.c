@@ -21,8 +21,7 @@ int to_eval(char *x) {
 }
 
 int main() {
-	tuple_space_set_configuration(TUPLE_SPACE_HOST, TUPLE_SPACE_PORT);
-
+	tuple_space_set_configuration("localhost", 10010, "admin", "some_pass");
 	char *str = "test";
 	int tuple[] = { 2, 5, 6, 8, 9 };
 	char *tuple_2[] = { "TEST 1", "HOHOHO", "LALALA" };
@@ -32,10 +31,12 @@ int main() {
 
 	//int arr[5] = { 1, 2, 3, 4, 5 };
 
-	eval("test1", (tuple_space_cb_t)&to_eval, str);
-	eval(str, (tuple_space_cb_t)&to_eval, str);
-	eval("test2", (tuple_space_cb_t)&to_eval, str);
-	eval("test3", (tuple_space_cb_t)&to_eval, str);
+	if (is_master()) {
+		eval("test1", (tuple_space_cb_t)&to_eval, str);
+		eval(str, (tuple_space_cb_t)&to_eval, str);
+		eval("test2", (tuple_space_cb_t)&to_eval, str);
+		eval("test3", (tuple_space_cb_t)&to_eval, str);
+	}
 
 	int ret = out(1, 2, 3, "test", str);
 	out(a, test(), tuple, tuple_2, str);

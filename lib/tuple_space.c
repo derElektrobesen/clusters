@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <errno.h>
 
 #include <pthread.h>
 
@@ -18,10 +19,13 @@
 #define LUA_in_FUNC "tuple_space.get_tuple"
 #define LUA_rd_FUNC "tuple_space.read_tuple"
 #define LUA_out_FUNC "tuple_space.add_tuple"
+#define LUA_is_mater_FUNC "tuple_space.is_master"
 
-#define TS_ASSERT(cond) ({									\
+#define TS_ASSERT(cond) _TS_ASSERT_EX(cond, "")
+#define TS_ASSERT_EX(cond, msg) _TS_ASSERT_EX(cond, "(" msg ")")
+#define _TS_ASSERT_EX(cond, msg) ({								\
 	if (!(cond)) {										\
-		log_e("ASSERTION FAILED: " #cond);						\
+		log_e("ASSERTION FAILED: " #cond " " msg);					\
 		exit(-1);									\
 	}											\
 })
@@ -150,12 +154,19 @@ TUPLE_SPACE_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
 #undef ARR
 #undef FORM_ARR
 
+static bool tuple_space_initialized = false;
+
 struct tuple_space_configuration_t {
 	char host[255];
 	uint16_t port;
 
+	char user[255];
+	char pass[255];
+
 	struct timeval conn_timeout;
 	struct timeval req_timeout;
+
+	bool inited;
 
 	threadpool_t *thread_pool;
 	pthread_key_t threads_key; // key, shared by all threads. Used to get thread-specific data from storage
@@ -196,6 +207,8 @@ struct eval_data_t {
 };
 
 static int tuple_space_connect(struct single_thread_t *thread_conf);
+static void run_main_thread();
+static void before_pragma_call();
 
 static char *pool_alloc(struct eval_data_t *thd, uint32_t needed) {
 	if (!thd->max_chunks || !thd->max_chunks || thd->n_chunks == thd->max_chunks) {
@@ -765,6 +778,70 @@ static void tuple_space_pragma_cleanup_wrapper(struct tuple_space_processor_t **
 }
 
 __attribute__((nonnull))
+static bool tuple_space_call_func(struct tuple_space_processor_t *prc, const char *lua_func_name, const char ** data, uint32_t *n_items) {
+	TS_ASSERT(prc->this_task);
+
+	struct single_thread_t *th = prc->this_task->thread;
+
+	int n_attempts = TUPLE_SPACE_MAX_REQ_TRIES;
+	bool ok = false;
+	while (n_attempts) {
+		if (n_attempts-- != TUPLE_SPACE_MAX_REQ_TRIES)
+			tuple_space_connect(th);
+
+		// send (or resend) request into tarantool and read response
+		tuple_space_send_request_to_tarantool(lua_func_name, prc);
+		if (tuple_space_read_tarantool_response(prc)) {
+			log_t("Tarantool's response came, repl == %p, data == %p", th->reply, th->reply ? th->reply->data : NULL);
+			ok = true;
+			break;
+		}
+	}
+
+	if (!ok) {
+		log_e("Can't receieve response from tarantool");
+		return false;
+	}
+
+	TS_ASSERT(th->reply);
+	if (get_req_sync(prc) != th->reply->sync) {
+		log_e("Incorrect response came: sync %" PRIu64 " expected, but %" PRIu64 " found", get_req_sync(prc), th->reply->sync);
+		return false;
+	}
+
+	// unpack response
+	*data = th->reply->data;
+	if (!*data) {
+		log_w("No data was returned from tarantool");
+		return false;
+	}
+
+	if (mp_typeof(**data) != MP_ARRAY) {
+		log_e("Invalid response from tarantool");
+		return false;
+	}
+
+	*n_items = mp_decode_array(data);
+	if (*n_items == 0) {
+		log_d("Nothing was returned from tarantool");
+		return false;
+	}
+	if (*n_items != 1) {
+		log_w("Unexpected number of items in tuple wrapper: %u, 1 expected", *n_items);
+		return false;
+	}
+
+	if (mp_typeof(**data) != MP_ARRAY) {
+		log_e("Unexpeted item type in response, array is expected, but item of type %u found", mp_typeof(**data));
+		return false;
+	}
+
+	*n_items = mp_decode_array(data);
+
+	return true;
+}
+
+__attribute__((nonnull))
 static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_type, struct tuple_space_processor_t *prc) {
 	TS_ASSERT(pragma_type >= 0 && pragma_type < tuple_space_max_auto_pragma_type);
 
@@ -798,60 +875,10 @@ static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_typ
 	TS_ASSERT(th->stream);
 	tuple_space_mk_request_args(prc);
 
-	int n_attempts = TUPLE_SPACE_MAX_REQ_TRIES;
-	bool ok = false;
-	while (n_attempts) {
-		if (n_attempts-- != TUPLE_SPACE_MAX_REQ_TRIES)
-			tuple_space_connect(th);
-
-		// send (or resend) request into tarantool and read response
-		tuple_space_send_request_to_tarantool(processor->lua_func_name, prc);
-		if (tuple_space_read_tarantool_response(prc)) {
-			log_t("Tarantool's response came, repl == %p, data == %p", th->reply, th->reply ? th->reply->data : NULL);
-			ok = true;
-			break;
-		}
-	}
-
-	if (!ok) {
-		log_e("Can't receieve response from tarantool");
+	uint32_t n_items;
+	const char *data;
+	if (!tuple_space_call_func(prc, processor->lua_func_name, &data, &n_items))
 		return false;
-	}
-
-	TS_ASSERT(th->reply);
-	if (get_req_sync(prc) != th->reply->sync) {
-		log_e("Incorrect response came: sync %" PRIu64 " expected, but %" PRIu64 " found", get_req_sync(prc), th->reply->sync);
-		return false;
-	}
-
-	// unpack response
-	const char *data = th->reply->data;
-	if (!data) {
-		log_w("No data was returned from tarantool");
-		return false;
-	}
-
-	if (mp_typeof(*data) != MP_ARRAY) {
-		log_e("Invalid response from tarantool");
-		return false;
-	}
-
-	uint32_t n_items = mp_decode_array(&data);
-	if (n_items == 0) {
-		log_d("Nothing was returned from tarantool");
-		return false;
-	}
-	if (n_items != 1) {
-		log_w("Unexpected number of items in tuple wrapper: %u, 1 expected", n_items);
-		return false;
-	}
-
-	if (mp_typeof(*data) != MP_ARRAY) {
-		log_e("Unexpeted item type in response, array is expected, but item of type %u found", mp_typeof(*data));
-		return false;
-	}
-
-	n_items = mp_decode_array(&data);
 
 	log_t("Tuple of size %u received from tarantool", n_items);
 
@@ -863,6 +890,8 @@ static bool tuple_space_process_pragma(enum tuple_space_pragma_type_t pragma_typ
 	__attribute__((nonnull))								\
 	void TUPLE_SPACE_PRAGMA_PROCESSOR(name)(int *ret, unsigned n_args, ...) {		\
 		TS_ASSERT(ret);									\
+												\
+		before_pragma_call();								\
 		*ret = 1;									\
 												\
 		log_d("Trying to process %s pragma, n_args == %u", #name, n_args);		\
@@ -967,8 +996,11 @@ static int tuple_space_connect(struct single_thread_t *thread_conf) {
 	}
 
 	// otherwise args will be copyed from previous version of tnt_stream
-	char uri[sizeof(conf->host) + sizeof("99999")] = "";
-	snprintf(uri, sizeof(uri), "%s:%u", conf->host, conf->port);
+	char uri[sizeof(conf->user) + sizeof(conf->pass) + sizeof(conf->host) + sizeof("99999") + 3] = "";
+	int off = 0;
+	if (*conf->user)
+		off = snprintf(uri, sizeof(uri), "%s:%s@", conf->user, conf->pass);
+	snprintf(uri + off, sizeof(uri) - off, "%s:%u", conf->host, conf->port);
 
 	tnt_set(thread_conf->tnt, TNT_OPT_URI, uri);
 	tnt_set(thread_conf->tnt, TNT_OPT_SEND_BUF, 0); // disable buffering for send
@@ -1054,7 +1086,12 @@ static void init_pool() {
 }
 
 int tuple_space_set_configuration_ex(const char *host, uint16_t port,
+		const char *user, const char *pass,
 		struct timeval *conn_timeout, struct timeval *req_timeout) {
+	TS_ASSERT_EX(!tuple_space_initialized, "Can't reinitialize tuple space on runtime");
+
+	log_w("Trying to initialize tuple space with args: user: '%s', host: '%s', port: '%u'", user, host, port);
+
 	int printed = snprintf(tuple_space_configuration.host, sizeof(tuple_space_configuration.host), "%s", host);
 	if (printed >= sizeof(tuple_space_configuration.host)) {
 		log_e("Too long hostname given into tuple_space_set_configuration()");
@@ -1072,10 +1109,55 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 	if (!req_timeout)
 		req_timeout = &default_req_timeout;
 
+	if (user && pass) {
+		snprintf(tuple_space_configuration.user, sizeof(tuple_space_configuration.user), "%s", user);
+		snprintf(tuple_space_configuration.pass, sizeof(tuple_space_configuration.pass), "%s", pass);
+	}
+
 	memcpy(&tuple_space_configuration.conn_timeout, conn_timeout, sizeof(*conn_timeout));
 	memcpy(&tuple_space_configuration.req_timeout, req_timeout, sizeof(*req_timeout));
 
 	tuple_space_configuration.port = port;
+	tuple_space_configuration.inited = true;
+
+	return 0;
+}
+
+__attribute__((constructor))
+static void default_configuration_setter() {
+	const char *host = NULL, *port = NULL, *user = NULL, *pass = NULL;
+	struct {
+		const char **ptr;
+		const char *name;
+	} env[] = {
+		{ &host, "TUPLE_SPACE_HOST", },
+		{ &port, "TUPLE_SPACE_PORT", },
+		{ &user, "TUPLE_SPACE_USER", },
+		{ &pass, "TUPLE_SPACE_PASS", },
+	};
+
+	for (int i = 0 ; i < sizeof(env) / sizeof(*env); ++i)
+		*(env[i].ptr) = getenv(env[i].name);
+
+	if (!port || !host)
+		return;
+
+	int p = strtol(port, NULL, 10);
+	if (!p && errno == EINVAL) {
+		log_e("Invalid port found in TUPLE_SPACE_PORT env var: %s", port);
+		return;
+	}
+
+	tuple_space_set_configuration(host, p, user, pass);
+}
+
+static void run_main_thread() {
+	if (tuple_space_initialized)
+		return;
+
+	log_d("Trying to initialize main thread");
+
+	tuple_space_initialized = true; // threads are not exists now
 
 	struct eval_data_t *thread_data = (struct eval_data_t *)calloc(1, sizeof(struct eval_data_t));
 	TS_ASSERT(thread_data);
@@ -1086,11 +1168,18 @@ int tuple_space_set_configuration_ex(const char *host, uint16_t port,
 	struct single_thread_t *conf = get_thread_conf(); // init main thread
 	set_thread_cross_pointers(thread_data, conf);
 
-	return 0;
+	log_d("Initialization done");
+}
+
+static void before_pragma_call() {
+	TS_ASSERT_EX(tuple_space_configuration.inited, "Call tuple_space_set_configuration() before");
+	run_main_thread();
 }
 
 int TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, void *arg) {
 	TS_ASSERT(name);
+
+	before_pragma_call();
 
 	log_d("Trying to eval tuple with name %s", name);
 
@@ -1110,3 +1199,42 @@ int TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, vo
 	return 0;
 }
 
+bool is_master() {
+	before_pragma_call();
+
+	log_d("is_master() was called");
+
+	struct single_thread_t *th = get_thread_conf();
+	TS_ASSERT(th && th->current_eval && th->current_eval->thread);
+
+	struct tuple_space_processor_t prc;
+	memset(&prc, 0, sizeof(prc));
+
+	prc.this_task = th->current_eval;
+
+	uint32_t n_items;
+	const char *data;
+
+	th->stream = tnt_object(th->stream);
+	TS_ASSERT(th->stream);
+	tnt_object_add_array(th->stream, 0); // this will be used in request
+
+	if (!tuple_space_call_func(&prc, LUA_is_mater_FUNC, &data, &n_items))
+		return false;
+
+	if (n_items != 1) {
+		log_e("Invalid response from tarantool, 1 value is expected, but %d found", n_items);
+		return false;
+	}
+
+	if (mp_typeof(*data) != MP_UINT) {
+		// see tarantool/include/tp.h to find real item type
+		log_e("Invalid response from tarantool: integer number is expected, but item of type %u found", mp_typeof(*data));
+		return false;
+	}
+
+	uint32_t is_master = mp_decode_uint(&data);
+	log_d("is_master == %d", is_master);
+
+	return is_master == 1;
+}

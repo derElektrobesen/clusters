@@ -45,6 +45,7 @@ TUPLE_SPACE_PROCESS_TYPES(COMM, FORM, ARR, FORM_ARR)
 
 typedef int (*tuple_space_cb_t)(void *arg);
 int TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(const char *name, tuple_space_cb_t cb, void *arg);
+bool is_master(); // returns true if current thread is a master. It can be only one master per system
 
 #define DECL_PRAGMA_PROCESSOR(n) \
 	void TUPLE_SPACE_PRAGMA_PROCESSOR(n)(int *ret, unsigned n_args, ...);
@@ -61,10 +62,11 @@ TUPLE_SPACE_SUPPORTED_PRAGMAS(DECL_PRAGMA_PROCESSOR)
 #define rd(...) __prgm(rd, __VA_ARGS__)
 #define eval(name, cb, arg) TUPLE_SPACE_PRAGMA_PROCESSOR(eval)(name, cb, arg)
 
-#define tuple_space_set_configuration(host, port) \
-	tuple_space_set_configuration_ex(host, port, NULL, NULL)
+#define tuple_space_set_configuration(host, port, user, pass) \
+	tuple_space_set_configuration_ex(host, port, user, pass, NULL, NULL)
 
 int tuple_space_set_configuration_ex(const char *host, uint16_t port,
+		const char *user, const char *pass,
 		struct timeval *conn_timeout, struct timeval *req_timeout)
 		__attribute__((nonnull(1)));
 

@@ -63,10 +63,15 @@ static void deinit_log() {
 void process_log_queue(void *arg __attribute__((unused))) {
 	can_write_log = true;
 
+	const struct timespec wait_time = {
+		.tv_sec = 1,
+		.tv_nsec = 0,
+	};
+
 	// This function should be called called from thread pool
 	while (can_write_log) {
 		pthread_mutex_lock(&log_context.lock);
-		pthread_cond_wait(&log_context.notify, &log_context.lock);
+		pthread_cond_timedwait(&log_context.notify, &log_context.lock, &wait_time);
 
 		for (int i = 0; i < log_context.last_queue_n; ++i) {
 			log_real("%.*s", log_context.queue[i].size, log_context.queue[i].ptr);

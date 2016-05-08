@@ -16,8 +16,7 @@ box.cfg {
 }
 
 box.once("initialization", function ()
-	-- Assume, that user hasn't `execute' permission by default
-	box.schema.user.grant('guest', 'read,write,execute', 'universe')
+	box.schema.user.passwd('admin', 'some_pass') -- admin have all privileges
 end)
 
 local __types_pri_idx = 1
@@ -80,6 +79,15 @@ box.once("space_creation", function ()
 		parts = {
 			1, 'NUM',
 			2, 'NUM',
+		},
+	})
+
+	s = box.schema.space.create('master')
+	s:create_index('primary', {
+		type = 'tree',
+		unique = true,
+		parts = {
+			1, 'NUM',
 		},
 	})
 end)
@@ -555,4 +563,21 @@ tuple_space = {
 		end
 		return tup
 	end,
+
+	is_master = function ()
+		-- TODO: call auto_increment on a global taratntool
+		local id = box.space.master:auto_increment{}
+		if id[1] == 1 then
+			return 1
+		end
+		return nil
+	end,
+
+	cleanup = function ()
+		box.space.tuples:truncate()
+		box.space.types:truncate()
+		box.space.master:truncate()
+	end,
 }
+
+tuple_space.cleanup() -- TODO: is it really needed ?
