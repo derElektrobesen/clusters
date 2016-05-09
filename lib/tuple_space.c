@@ -191,6 +191,12 @@ struct single_thread_t {
 	struct tnt_stream *stream;
 
 	struct eval_data_t *current_eval; // XXX: Don't destroy this object
+
+	enum {
+		ROLE_UNKNOWN = 0,
+		MASTER_THREAD,
+		SLAVE_THREAD,
+	} role;
 };
 
 struct eval_data_t {
@@ -1207,6 +1213,9 @@ bool is_master() {
 	struct single_thread_t *th = get_thread_conf();
 	TS_ASSERT(th && th->current_eval && th->current_eval->thread);
 
+	if (th->role != ROLE_UNKNOWN)
+		return th->role == MASTER_THREAD;
+
 	struct tuple_space_processor_t prc;
 	memset(&prc, 0, sizeof(prc));
 
@@ -1235,6 +1244,11 @@ bool is_master() {
 
 	uint32_t is_master = mp_decode_uint(&data);
 	log_d("is_master == %d", is_master);
+
+	if (is_master == 1)
+		th->role = MASTER_THREAD;
+	else
+		th->role = SLAVE_THREAD;
 
 	return is_master == 1;
 }
